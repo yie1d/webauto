@@ -1,0 +1,30 @@
+[project]
+name = "asynccdp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiohttp>=3.11.18",
+    "loguru>=0.7.3",
+    "pydantic>=2.11.3",
+    "websockets>=15.0.1",
+]
+
+[tool.ruff.lint]
+preview = true
+select = ["E", "F", "W", "I", "UP"]
+exclude = ["tests", "tests/*", "demos/*"]
+
+[tool.ruff.format]
+preview = true
+quote-style = "single"
+
+[dependency-groups]
+ruff = [
+    "ruff>=0.11.6",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
