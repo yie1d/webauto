@@ -1,12 +1,12 @@
 import platform
 import stat
-from abc import ABC, abstractmethod
 from pathlib import Path
 
+from cdpkit.exceptions import ExecutableNotFoundError
 from src.logger import logger
 
 
-class Options(ABC):
+class Options:
     def __init__(
         self,
         executable_path: str | Path = '',
@@ -71,10 +71,10 @@ class Options(ABC):
     def add_default_arguments(self):
         self.add_argument('--no-first-run')
         self.add_argument('--no-default-browser-check')
+        self.add_argument('--remote-allow-origins=*')
 
-    @abstractmethod
-    def get_default_executable_path(self) -> str:  # pragma: no cover
-        ...
+    def get_default_executable_path(self) -> str:
+        raise ExecutableNotFoundError
 
 
 class ChromeOptions(Options):
@@ -95,6 +95,42 @@ class ChromeOptions(Options):
             ],
             'Darwin': [
                 '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            ],
+        }
+
+        browser_path = browser_paths.get(os_name)
+
+        if not browser_path:
+            raise ValueError('Unsupported OS')
+
+        return self._validate_browser_paths(browser_path)
+
+
+class EdgeOptions(Options):
+    def add_default_arguments(self):
+        super().add_default_arguments()
+        self.add_argument('--disable-crash-reporter')
+        self.add_argument('--disable-features=TranslateUI')
+        self.add_argument('--disable-component-update')
+        self.add_argument('--disable-background-networking')
+
+    def get_default_executable_path(self) -> str:
+        os_name = platform.system()
+
+        browser_paths = {
+            'Windows': [
+                (
+                    r'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
+                ),
+                (
+                    r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+                ),
+            ],
+            'Linux': [
+                '/usr/bin/microsoft-edge',
+            ],
+            'Darwin': [
+                '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
             ],
         }
 
