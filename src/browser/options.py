@@ -72,6 +72,7 @@ class Options:
         self.add_argument('--no-first-run')
         self.add_argument('--no-default-browser-check')
         self.add_argument('--remote-allow-origins=*')
+        self.add_argument('--enable-experimental-web-platform-features')
 
     def get_default_executable_path(self) -> str:
         raise ExecutableNotFoundError

@@ -12,6 +12,11 @@ class State(IntEnum):
     STOPPED: int = auto()
 
 
+class PageSessionState(IntEnum):
+    DISABLED: int = auto()
+    ENABLED: int = auto()
+
+
 class BrowserType(IntEnum):
     CHROME: int = auto()
     EDGE: int = auto()

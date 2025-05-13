@@ -3,10 +3,9 @@ import dataclasses
 import random
 import subprocess
 
-from cdpkit.connection import CDPSession, CDPSessionManager
+from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
 from cdpkit.exceptions import PageNotFoundError
 from cdpkit.protocol import Browser, Network, Storage, Target
-from cdpkit.protocol.base import RESULT_TYPE, CDPEvent, CDPMethod
 from src.browser.constants import BrowserType, State
 from src.browser.options import ChromeOptions, EdgeOptions, Options
 from src.browser.page import PageSession
@@ -110,13 +109,14 @@ class BrowserProcess:
             self._status = State.STOPPED
 
 
-class Chromium:
+class Chromium(CDPSessionExecutor):
     def __init__(
         self,
         options: Options | None = None,
         remote_port: int | None = None,
         browser_type: BrowserType | None = None
     ):
+        super().__init__()
         if options is None:
             match browser_type:
                 case BrowserType.EDGE:
@@ -172,10 +172,21 @@ class Chromium:
             await asyncio.sleep(1)
         return False
 
-    async def execute_method(self, cdp_method: CDPMethod[RESULT_TYPE], timeout: int = 60) -> RESULT_TYPE:
-        return await self._session.execute(
-            cdp_method,
-            timeout
+    async def _on_target_created(self, event_data: Target.TargetCreated):
+        logger.debug(f'_on_target_created: {event_data}')
+
+    async def _on_target_destroyed(self, event_data: Target.TargetDestroyed):
+        logger.debug(f'_on_target_destroyed: {event_data}')
+
+    async def _init_browser_session(self):
+        await self.execute_method(Target.SetDiscoverTargets(discover=True))
+        await self.on(
+            Target.TargetCreated,
+            self._on_target_created
+        )
+        await self.on(
+            Target.TargetDestroyed,
+            self._on_target_destroyed
         )
 
     async def launch(self):
@@ -184,6 +195,7 @@ class Chromium:
         self._session = self._session_manager.get_session()
 
         await self._verify_browser_running()
+        await self._init_browser_session()
 
         self._state = State.STARTED
 
@@ -191,14 +203,16 @@ class Chromium:
         if remote_port and remote_port != self._info.remote_port:
             self._info.remote_port = remote_port
             self._session_manager = CDPSessionManager(self._info.remote_port)
-            self._session = self._session_manager.get_session()
+        self._session = self._session_manager.get_session()
         await self._verify_browser_running()
-
+        await self._init_browser_session()
+        self._state = State.STARTED
         return await self.get_page()
 
     def quit(self) -> None:
         if self._state == State.STARTED:
             self._state = State.STOPPED
+            self.execute_method(Browser.Close())
             # self._process.stop()
             # TempDirectoryFactory().clean_up()
 
@@ -245,8 +259,3 @@ class Chromium:
 
     async def get_cookies(self) -> list[Network.Cookie]:
         return (await self.execute_method(Storage.GetCookies())).cookies
-
-    async def on(self, event: type[CDPEvent], callback: callable, temporary: bool = False) -> int:
-        return await self._session.event_handler.register_callback(
-            event.event_name, callback, temporary
-        )

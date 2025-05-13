@@ -1,4 +1,4 @@
-from src.browser.chromium.base import Browser
+from src.browser.chromium.chromium import Browser
 from src.browser.constants import BrowserType
 from src.browser.options import Options
 
