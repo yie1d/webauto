@@ -15,6 +15,7 @@ class State(IntEnum):
 class PageSessionState(IntEnum):
     DISABLED: int = auto()
     ENABLED: int = auto()
+    CLOSED: int = auto()
 
 
 class BrowserType(IntEnum):
