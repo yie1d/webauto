@@ -3,10 +3,10 @@ import dataclasses
 import random
 import subprocess
 
-from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
+from cdpkit.connection import CDPSessionExecutor, CDPSessionManager
 from cdpkit.exceptions import PageNotFoundError
 from cdpkit.protocol import Browser, Network, Storage, Target
-from src.browser.constants import BrowserType, State
+from src.browser.constants import BrowserState, BrowserType, ProcessState
 from src.browser.options import ChromeOptions, EdgeOptions, Options
 from src.browser.page import PageSession
 from src.logger import logger
@@ -81,7 +81,7 @@ class BrowserProcess:
     def __init__(self, start_command: list[str]):
         self._start_command = start_command
         self._process: subprocess.Popen | None = None
-        self._status: State = State.INITIALIZED
+        self._status: ProcessState = ProcessState.INITIALIZED
 
     @staticmethod
     def _run_process(command: list[str]) -> subprocess.Popen:
@@ -92,12 +92,12 @@ class BrowserProcess:
         )
 
     def run(self) -> None:
-        if self._process is None and self._process != State.STARTED:
+        if self._process is None and self._process != ProcessState.STARTED:
             self._process = self._run_process(self._start_command)
-            self._status = State.STARTED
+            self._status = ProcessState.STARTED
 
     def stop(self) -> None:
-        if self._process and self._status == State.STARTED:
+        if self._process and self._status == ProcessState.STARTED:
             logger.info('Stopping process')
             self._process.terminate()
             try:
@@ -106,17 +106,75 @@ class BrowserProcess:
                 self._process.kill()
                 logger.info('process killed')
             self._process = None
-            self._status = State.STOPPED
+            self._status = ProcessState.STOPPED
 
 
-class Chromium(CDPSessionExecutor):
+class BrowserHandler(CDPSessionExecutor):
+    async def new_page(self, url: str = '') -> PageSession:
+        target_id = (await self.execute_method(Target.CreateTarget(url=url))).targetId
+
+        return PageSession(self._session_manager, target_id)
+
+    @property
+    async def pages(self) -> list[Target.TargetID]:
+        pages = []
+        for page in await self._get_all_pages():
+            pages.append(page.targetId)
+        return pages
+
+    async def _get_all_pages(self) -> list[Target.TargetInfo]:
+        return (await self.execute_method(Target.GetTargets(filter_=[{
+            'type': 'page',
+            'exclude': False
+        }]))).targetInfos
+
+    async def get_page(self, page_id: Target.TargetID | None = None) -> PageSession:
+        pages = await self.pages
+
+        if page_id is not None:
+            if page_id not in pages:
+                raise PageNotFoundError(f'Page {page_id} not found')
+            return PageSession(self._session_manager, page_id)
+        else:
+            if len(pages) == 0:
+                return await self.new_page()
+            else:
+                return PageSession(self._session_manager, pages[-1])
+
+    async def set_download_path(self, path: str) -> None:
+        await self.execute_method(Browser.SetDownloadBehavior(
+            behavior='allow',
+            download_path=path
+        ))
+
+    async def set_cookies(self, cookies: list[dict]):
+        """
+        Sets cookies in the browser.
+
+        Args:
+            cookies (list[dict]): A list of dictionaries containing the cookie data.
+        """
+        await self.execute_method(Storage.SetCookies(cookies=cookies))
+        await self.execute_method(Network.SetCookies(cookies=cookies))
+
+    async def delete_all_cookies(self):
+        """
+        Deletes all cookies from the browser.
+        """
+        await self.execute_method(Storage.ClearCookies())
+        await self.execute_method(Network.ClearBrowserCookies())
+
+    async def get_cookies(self) -> list[Network.Cookie]:
+        return (await self.execute_method(Storage.GetCookies())).cookies
+
+
+class Chromium(BrowserHandler):
     def __init__(
         self,
         options: Options | None = None,
         remote_port: int | None = None,
         browser_type: BrowserType | None = None
     ):
-        super().__init__()
         if options is None:
             match browser_type:
                 case BrowserType.EDGE:
@@ -136,17 +194,11 @@ class Chromium(CDPSessionExecutor):
         )
 
         self._process = BrowserProcess(self._info.start_command)
-        self._session_manager = CDPSessionManager(self._info.remote_port)
+        self._state = BrowserState.INITIALIZED
 
-        self._session: CDPSession | None = None
-        self._state = State.INITIALIZED
-
-    @property
-    async def pages(self) -> list[Target.TargetID]:
-        pages = []
-        for page in await self._get_all_pages():
-            pages.append(page.targetId)
-        return pages
+        super().__init__(
+            session_manager=CDPSessionManager(self._info.remote_port)
+        )
 
     async def __aenter__(self):
         return self
@@ -154,12 +206,6 @@ class Chromium(CDPSessionExecutor):
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         # self.quit()
         ...
-
-    async def _get_all_pages(self) -> list[Target.TargetInfo]:
-        return (await self.execute_method(Target.GetTargets(filter_=[{
-            'type': 'page',
-            'exclude': False
-        }]))).targetInfos
 
     async def _verify_browser_running(self):
         if not await self._is_browser_running():
@@ -197,7 +243,7 @@ class Chromium(CDPSessionExecutor):
         await self._verify_browser_running()
         await self._init_browser_session()
 
-        self._state = State.STARTED
+        self._state = BrowserState.STARTED
 
     async def connect(self, remote_port: int | None = None) -> PageSession:
         if remote_port and remote_port != self._info.remote_port:
@@ -206,56 +252,12 @@ class Chromium(CDPSessionExecutor):
         self._session = self._session_manager.get_session()
         await self._verify_browser_running()
         await self._init_browser_session()
-        self._state = State.STARTED
+        self._state = BrowserState.STARTED
         return await self.get_page()
 
     def quit(self) -> None:
-        if self._state == State.STARTED:
-            self._state = State.STOPPED
+        if self._state == BrowserState.STARTED:
+            self._state = BrowserState.STOPPED
             self.execute_method(Browser.Close())
             # self._process.stop()
             # TempDirectoryFactory().clean_up()
-
-    async def get_page(self, page_id: Target.TargetID | None = None) -> PageSession:
-        pages = await self.pages
-
-        if page_id is not None:
-            if page_id not in pages:
-                raise PageNotFoundError(f'Page {page_id} not found')
-            return PageSession(self._session_manager, page_id)
-        else:
-            if len(pages) == 0:
-                return await self.new_page()
-            else:
-                return PageSession(self._session_manager, pages[-1])
-
-    async def new_page(self, url: str = '') -> PageSession:
-        target_id = (await self.execute_method(Target.CreateTarget(url=url))).targetId
-
-        return PageSession(self._session_manager, target_id)
-
-    async def set_download_path(self, path: str) -> None:
-        await self.execute_method(Browser.SetDownloadBehavior(
-            behavior='allow',
-            download_path=path
-        ))
-
-    async def set_cookies(self, cookies: list[dict]):
-        """
-        Sets cookies in the browser.
-
-        Args:
-            cookies (list[dict]): A list of dictionaries containing the cookie data.
-        """
-        await self.execute_method(Storage.SetCookies(cookies=cookies))
-        await self.execute_method(Network.SetCookies(cookies=cookies))
-
-    async def delete_all_cookies(self):
-        """
-        Deletes all cookies from the browser.
-        """
-        await self.execute_method(Storage.ClearCookies())
-        await self.execute_method(Network.ClearBrowserCookies())
-
-    async def get_cookies(self) -> list[Network.Cookie]:
-        return (await self.execute_method(Storage.GetCookies())).cookies

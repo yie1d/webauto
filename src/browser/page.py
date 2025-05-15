@@ -1,17 +1,20 @@
 import asyncio
 
-from cdpkit.connection import CDPSessionExecutor, CDPSessionManager
+from cdpkit.connection import CDPSessionManager
 from cdpkit.protocol import DOM, RESULT_TYPE, CDPEvent, CDPMethod, Page, Runtime, Target
 from src.browser.constants import PageSessionState
+from src.browser.element import ElementFinder
 from src.logger import logger
 
 
-class PageSession(CDPSessionExecutor):
+class PageSession(ElementFinder):
     def __init__(self, session_manager: CDPSessionManager, target_id: Target.TargetID, page_load_timeout: int = 30):
-        super().__init__()
+        super().__init__(
+            session=session_manager.get_session(target_id),
+            session_manager=session_manager
+        )
+
         self._target_id = target_id
-        self._session_manager = session_manager
-        self._session = session_manager.get_session(target_id)
         self._page_load_timeout = page_load_timeout
         self._state = PageSessionState.DISABLED
 
@@ -34,14 +37,22 @@ class PageSession(CDPSessionExecutor):
         else:
             raise TimeoutError('Page load timed out')
 
-    async def enable_page_session(self):
-        self._state = PageSessionState.ENABLED
+    async def _init_page(self):
         await self._wait_page_load()
         await self.on(Page.JavascriptDialogOpening, self._on_dialog_opening)
         await self.on(Page.JavascriptDialogClosed, self._on_dialog_closed)
 
         await self.execute_method(Page.Enable())
         await self.execute_method(DOM.Enable())
+        await self.execute_method(Runtime.Enable())
+
+        # reset page state
+        self.reset()
+        await self.node
+
+    async def enable_page_session(self):
+        self._state = PageSessionState.ENABLED
+        await self._init_page()
 
     async def _judge_session_state(self):
         if self._state == PageSessionState.DISABLED:
@@ -80,6 +91,10 @@ class PageSession(CDPSessionExecutor):
     async def title(self) -> str:
         return (await self.execute_method(Target.GetTargetInfo(target_id=self._target_id))).targetInfo.title
 
+    @property
+    async def page_source(self) -> str:
+        return (await self.execute_method(DOM.GetOuterHTML(backend_node_id=await self.backend_node_id))).outerHTML
+
     async def activate(self):
         await self.execute_method(Target.ActivateTarget(target_id=self._target_id))
         await self.execute_method(Page.BringToFront())
@@ -91,7 +106,7 @@ class PageSession(CDPSessionExecutor):
     async def get(self, url: str):
         await self.execute_method(Page.Navigate(url=url))
 
-        await self._wait_page_load()
+        await self._init_page()
 
     async def new_page(self, url: str = '') -> 'PageSession':
         target_id = (await self.execute_method(Target.CreateTarget(url=url))).targetId
@@ -101,4 +116,4 @@ class PageSession(CDPSessionExecutor):
     async def refresh(self):
         await self.execute_method(Page.Reload())
 
-        await self._wait_page_load()
+        await self._init_page()
