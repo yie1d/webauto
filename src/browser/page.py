@@ -111,7 +111,7 @@ class PageSession(ElementFinder):
     async def new_page(self, url: str = '') -> 'PageSession':
         target_id = (await self.execute_method(Target.CreateTarget(url=url))).targetId
 
-        return PageSession(self._session_manager, target_id)
+        return PageSession(self._session_manager, target_id, self._page_load_timeout)
 
     async def refresh(self):
         await self.execute_method(Page.Reload())

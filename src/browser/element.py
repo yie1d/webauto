@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Any
 
 from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
 from cdpkit.exceptions import NoSuchElement
 from cdpkit.protocol import DOM, Runtime
 from src.browser.constants import By
+from src.browser.utils import RuntimeParser
 
 
 class ElementFinder(CDPSessionExecutor):
@@ -112,6 +113,7 @@ class ElementFinder(CDPSessionExecutor):
     ) -> list[Element]:
         if self.__class__.__name__ == 'Element':
             xpath = xpath.replace('"', '\\"')
+
             if mode == 'multiple':
                 function_declaration = f"""
                     function() {{
@@ -142,27 +144,13 @@ class ElementFinder(CDPSessionExecutor):
                 return_by_value=False
             ))).result
 
-            object_ids = []
-            if call_result.type == 'object':
-                if call_result.subtype == 'node':
-                    object_ids.append(call_result.objectId)
+            object_ids: list[Runtime.RemoteObjectId] | None = await RuntimeParser.parse_remote_object(
+                session_executor=self,
+                remote_object=call_result
+            )
+            if object_ids is None:
+                raise NoSuchElement
 
-                elif call_result.subtype == 'array':
-                    query_properties = (await self.execute_method(Runtime.GetProperties(
-                        object_id=call_result.objectId
-                    ))).result
-
-                    for query_property in query_properties:
-                        if (
-                            query_property.value and
-                            query_property.value.type == 'object' and
-                            query_property.value.subtype == 'node'
-                        ):
-                            object_ids.append(query_property.value.objectId)
-                else:
-                    raise Exception(f"It needs to be implemented {call_result.model_dump()}")
-            else:
-                raise Exception(f"It needs to be implemented {call_result.model_dump()}")
 
             elements = []
             for object_id in object_ids:
@@ -177,16 +165,23 @@ class ElementFinder(CDPSessionExecutor):
             perform_search = (await self.execute_method(
                 DOM.PerformSearch(query=xpath, include_user_agent_shadow_dom=True)
             ))
-            if mode == 'multiple':
-                to_index = perform_search.resultCount
-            else:
-                to_index = 1
-            node_ids = (await self.execute_method(DOM.GetSearchResults(
-                search_id=perform_search.searchId,
-                from_index=0,
-                to_index=to_index
-            ))).nodeIds
-            await self.execute_method(DOM.DiscardSearchResults(search_id=perform_search.searchId))
+            try:
+                if perform_search.resultCount == 0:
+                    if mode == 'multiple':
+                        return []
+                    else:
+                        raise NoSuchElement
+                if mode == 'multiple':
+                    to_index = perform_search.resultCount
+                else:
+                    to_index = 1
+                node_ids = (await self.execute_method(DOM.GetSearchResults(
+                    search_id=perform_search.searchId,
+                    from_index=0,
+                    to_index=to_index
+                ))).nodeIds
+            finally:
+                await self.execute_method(DOM.DiscardSearchResults(search_id=perform_search.searchId))
 
             return [await self._make_element(node_id=node_id) for node_id in node_ids]
 
@@ -221,9 +216,36 @@ class Element(ElementFinder):
             backend_node_id=backend_node_id,
             node=node
         )
+        self._attrs = {}
 
     @property
-    async def attrs(self) -> list[str]:
-        return (await self.execute_method(DOM.GetAttributes(
-            node_id=(await self.node_id)
-        ))).attributes
+    async def value(self) -> str | None:
+        return (await self.attrs).get('value')
+
+    @property
+    async def tag(self) -> str:
+        return (await self.node).nodeName
+
+    @property
+    async def class_name(self) -> str | None:
+        return (await self.attrs).get('class')
+
+    @property
+    async def id(self) -> str | None:
+        return (await self.attrs).get('id')
+
+    @property
+    async def attrs(self) -> dict[str, str]:
+        if not self._attrs:
+            attrs = (await self.node).attributes
+            for inx in range(0, len(attrs), 2):
+                self._attrs[attrs[inx]] = attrs[inx + 1]
+        return self._attrs
+
+    async def get_attribute(self, name: str) -> str | None:
+        return (await self.attrs).get(name)
+
+    async def scroll_into_view(self):
+        await self.execute_method(DOM.ScrollIntoViewIfNeeded(
+            backend_node_id=await self.backend_node_id,
+        ))
