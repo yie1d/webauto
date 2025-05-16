@@ -1,14 +1,13 @@
-from cdpkit.protocol import Runtime
 from cdpkit.connection import CDPSessionExecutor
-
-
+from cdpkit.protocol import Runtime
 from src.logger import logger
+
 
 class RuntimeParser:
     @classmethod
     async def parse_remote_object(
-        cls, 
-        session_executor: CDPSessionExecutor, 
+        cls,
+        session_executor: CDPSessionExecutor,
         remote_object: Runtime.RemoteObject
     ) -> Runtime.RemoteObjectId | list[Runtime.RemoteObjectId] | None:
         match remote_object.type:
@@ -20,12 +19,15 @@ class RuntimeParser:
                         query_properties = (await session_executor.execute_method(Runtime.GetProperties(
                             object_id=remote_object.objectId
                         ))).result
-                        
+
                         res = []
                         for query_property in query_properties:
                             # 只取数字索引
                             if query_property.name.isdigit():
-                                query_property_result = await cls.parse_remote_object(session_executor, query_property.value)
+                                query_property_result = await cls.parse_remote_object(
+                                    session_executor,
+                                    query_property.value
+                                )
 
                                 if isinstance(query_property_result, Runtime.RemoteObjectId):
                                     res.append(query_property_result)
