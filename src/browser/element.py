@@ -22,26 +22,26 @@ class ElementFinder(CDPSessionExecutor):
             session_manager=session_manager
         )
 
+        if backend_node_id is None and node is not None:
+            backend_node_id = node.backendNodeId
+
         self._backend_node_id = backend_node_id
-        self._node = node
         self._object_id: Runtime.RemoteObjectId | None = None
 
     def reset(self, backend_node_id: DOM.BackendNodeId | None = None):
         self._object_id = None
-        self._node = None
         self._backend_node_id = backend_node_id
 
     @property
     async def node(self) -> DOM.Node:
-        if self._node is None:
-            if self._backend_node_id is None:
-                self._node = (await self.execute_method(DOM.GetDocument(depth=0))).root
-                self._backend_node_id = self._node.backendNodeId
-            else:
-                self._node = (await self.execute_method(DOM.DescribeNode(
-                    backend_node_id=await self.backend_node_id
-                ))).node
-        return self._node
+        if self._backend_node_id is None:
+            _node = (await self.execute_method(DOM.GetDocument(depth=0))).root
+            self._backend_node_id = _node.backendNodeId
+        else:
+            _node = (await self.execute_method(DOM.DescribeNode(
+                backend_node_id=await self.backend_node_id
+            ))).node
+        return _node
 
     @property
     async def backend_node_id(self) -> DOM.BackendNodeId:
@@ -215,11 +215,10 @@ class Element(ElementFinder):
             backend_node_id=backend_node_id,
             node=node
         )
-        self._attrs = {}
 
     @property
     async def value(self) -> str | None:
-        return (await self.attrs).get('value')
+        return await self.get_attribute('value')
 
     @property
     async def tag(self) -> str:
@@ -227,24 +226,37 @@ class Element(ElementFinder):
 
     @property
     async def class_name(self) -> str | None:
-        return (await self.attrs).get('class')
+        return await self.get_attribute('class')
 
     @property
     async def id(self) -> str | None:
-        return (await self.attrs).get('id')
+        return await self.get_attribute('id')
 
     @property
     async def attrs(self) -> dict[str, str]:
-        if not self._attrs:
-            attrs = (await self.node).attributes
-            for inx in range(0, len(attrs), 2):
-                self._attrs[attrs[inx]] = attrs[inx + 1]
-        return self._attrs
+        return await self.get_attribute()
 
-    async def get_attribute(self, name: str) -> str | None:
-        return (await self.attrs).get(name)
+    async def get_attribute(self, name: str | None = None) -> dict[str, str] | str | None:
+        attrs = {}
+
+        _attrs = (await self.node).attributes
+        for inx in range(0, len(_attrs), 2):
+            if name == _attrs[inx]:
+                return _attrs[inx + 1]
+            else:
+                attrs[_attrs[inx]] = _attrs[inx + 1]
+
+        return None if name is None else attrs
 
     async def scroll_into_view(self):
         await self.execute_method(DOM.ScrollIntoViewIfNeeded(
             backend_node_id=await self.backend_node_id,
         ))
+        
+    async def click(self):
+        await self.scroll_into_view()
+
+    async def input(self, value: str):
+        ...
+
+
