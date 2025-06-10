@@ -1,22 +1,42 @@
 import asyncio
 
-from cdpkit.connection import CDPSessionManager
+from cdpkit.connection import CDPSession, CDPSessionManager
 from cdpkit.protocol import DOM, RESULT_TYPE, CDPEvent, CDPMethod, Page, Runtime, Target
-from src.browser.constants import PageSessionState
+from src.browser.constants import TabState
 from src.browser.element import ElementFinder
 from src.logger import logger
 
 
-class PageSession(ElementFinder):
-    def __init__(self, session_manager: CDPSessionManager, target_id: Target.TargetID, page_load_timeout: int = 30):
+class Tab(ElementFinder):
+    def __init__(
+        self,
+        session: CDPSession,
+        session_manager: CDPSessionManager,
+        target_id: Target.TargetID,
+        page_load_timeout: int = 30
+    ):
         super().__init__(
-            session=session_manager.get_session(target_id),
+            session=session,
             session_manager=session_manager
         )
 
         self._target_id = target_id
         self._page_load_timeout = page_load_timeout
-        self._state = PageSessionState.DISABLED
+        self._state = TabState.DISABLED
+
+    @classmethod
+    async def create_obj(
+        cls,
+        session_manager: CDPSessionManager,
+        target_id: Target.TargetID,
+        page_load_timeout: int = 30
+    ):
+        return cls(
+            session=await session_manager.get_session(target_id),
+            session_manager=session_manager,
+            target_id=target_id,
+            page_load_timeout=page_load_timeout
+        )
 
     async def _on_dialog_opening(self, event_data: Page.JavascriptDialogOpening):
         logger.debug(f'Page.JavascriptDialogOpening: {event_data}')
@@ -37,7 +57,7 @@ class PageSession(ElementFinder):
         else:
             raise TimeoutError('Page load timed out')
 
-    async def _init_page(self):
+    async def _init_tab(self):
         await self._wait_page_load()
         await self.on(Page.JavascriptDialogOpening, self._on_dialog_opening)
         await self.on(Page.JavascriptDialogClosed, self._on_dialog_closed)
@@ -51,13 +71,13 @@ class PageSession(ElementFinder):
         await self.node
 
     async def enable_page_session(self):
-        self._state = PageSessionState.ENABLED
-        await self._init_page()
+        self._state = TabState.ENABLED
+        await self._init_tab()
 
     async def _judge_session_state(self):
-        if self._state == PageSessionState.DISABLED:
+        if self._state == TabState.DISABLED:
             await self.enable_page_session()
-        elif self._state == PageSessionState.CLOSED:
+        elif self._state == TabState.CLOSED:
             raise RuntimeError('Page session has closed')
 
     async def execute_method(self, cdp_method: CDPMethod[RESULT_TYPE], timeout: int = 60) -> RESULT_TYPE:
@@ -71,7 +91,7 @@ class PageSession(ElementFinder):
         return await super().on(event, callback, temporary)
 
     def __str__(self):
-        return f'PageSession(target_id={self._target_id})'
+        return f'Tab(target_id={self._target_id})'
 
     def __repr__(self) -> str:
         return str(self)
@@ -101,19 +121,19 @@ class PageSession(ElementFinder):
 
     async def close(self):
         await self.execute_method(Target.CloseTarget(target_id=self._target_id))
-        self._state = PageSessionState.CLOSED
+        self._state = TabState.CLOSED
 
     async def get(self, url: str):
         await self.execute_method(Page.Navigate(url=url))
 
-        await self._init_page()
+        await self._init_tab()
 
-    async def new_page(self, url: str = '') -> 'PageSession':
+    async def new_tab(self, url: str = '') -> 'Tab':
         target_id = (await self.execute_method(Target.CreateTarget(url=url))).targetId
 
-        return PageSession(self._session_manager, target_id, self._page_load_timeout)
+        return await Tab.create_obj(self._session_manager, target_id, self._page_load_timeout)
 
     async def refresh(self):
         await self.execute_method(Page.Reload())
 
-        await self._init_page()
+        await self._init_tab()

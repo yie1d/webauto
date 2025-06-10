@@ -1,16 +1,17 @@
-from src.browser.chromium.chromium import Browser
-from src.browser.constants import BrowserType
-from src.browser.options import Options
+from src.browser.chromium.chromium import Chromium
+from src.browser.options import EdgeOptions, Options
 
 
-class Edge(Browser):
+class Edge(Chromium):
     def __init__(
         self,
         options: Options | None = None,
         remote_port: int | None = None,
     ):
+        if options is None:
+            options = EdgeOptions()
+
         super().__init__(
             options=options,
-            remote_port=remote_port,
-            browser_type=BrowserType.EDGE
+            remote_port=remote_port
         )

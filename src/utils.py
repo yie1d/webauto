@@ -17,7 +17,7 @@ class TempDirectoryFactory(metaclass=SingletonMeta):
             self._temp_dir_factory = TemporaryDirectory
 
     def create_temp_dir(self, prefix: str | None = None):
-        temp_dir = self._temp_dir_factory(prefix=prefix)
+        temp_dir = self._temp_dir_factory(prefix=prefix, delete=False)
         self._temp_dirs.append(temp_dir)
         return temp_dir
 

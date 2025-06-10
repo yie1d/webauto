@@ -2,7 +2,7 @@ import platform
 import stat
 from pathlib import Path
 
-from cdpkit.exceptions import ExecutableNotFoundError
+from cdpkit.exception import ExecutableNotFoundError
 from src.logger import logger
 
 

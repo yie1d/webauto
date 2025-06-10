@@ -1,3 +1,3 @@
 # StudyAsyncCDP
 
-Imitate the specific implementation of the source code of the pydoll library and learn about CDP (Chrome DevTools Protocol) .
+The primary objective of this project, with reference to [pydoll](https://github.com/autoscrape-labs/pydoll), is to learn the implementation of browser control based on CDP.

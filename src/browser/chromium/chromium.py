@@ -4,11 +4,11 @@ import random
 import subprocess
 
 from cdpkit.connection import CDPSessionExecutor, CDPSessionManager
-from cdpkit.exceptions import PageNotFoundError
+from cdpkit.exception import BrowserLaunchError, TabNotFoundError
 from cdpkit.protocol import Browser, Network, Storage, Target
-from src.browser.constants import BrowserState, BrowserType, ProcessState
-from src.browser.options import ChromeOptions, EdgeOptions, Options
-from src.browser.page import PageSession
+from src.browser.constants import BrowserState, ProcessState
+from src.browser.options import ChromeOptions, Options
+from src.browser.tab import Tab
 from src.logger import logger
 from src.utils import TempDirectoryFactory
 
@@ -110,36 +110,33 @@ class BrowserProcess:
 
 
 class BrowserHandler(CDPSessionExecutor):
-    async def new_page(self, url: str = '') -> PageSession:
+    async def new_tab(self, url: str = '') -> Tab:
         target_id = (await self.execute_method(Target.CreateTarget(url=url))).targetId
 
-        return PageSession(self._session_manager, target_id)
+        return await Tab.create_obj(self._session_manager, target_id)
 
-    @property
-    async def pages(self) -> list[Target.TargetID]:
-        pages = []
-        for page in await self._get_all_pages():
-            pages.append(page.targetId)
-        return pages
-
-    async def _get_all_pages(self) -> list[Target.TargetInfo]:
+    async def _get_targets(self) -> list[Target.TargetInfo]:
         return (await self.execute_method(Target.GetTargets(filter_=[{
             'type': 'page',
             'exclude': False
         }]))).targetInfos
 
-    async def get_page(self, page_id: Target.TargetID | None = None) -> PageSession:
-        pages = await self.pages
+    async def get_tab(self, target_id: Target.TargetID | None = None) -> Tab:
+        target_infos = await self._get_targets()
 
-        if page_id is not None:
-            if page_id not in pages:
-                raise PageNotFoundError(f'Page {page_id} not found')
-            return PageSession(self._session_manager, page_id)
+        valid_target_ids = [
+            target_info.targetId for target_info in target_infos if 'extension' not in target_info.url
+        ]
+
+        if target_id is not None:
+            if target_id not in valid_target_ids:
+                raise TabNotFoundError(f'Tab {target_id} not found')
+            return await Tab.create_obj(self._session_manager, target_id)
         else:
-            if len(pages) == 0:
-                return await self.new_page()
+            if len(valid_target_ids) == 0:
+                return await self.new_tab()
             else:
-                return PageSession(self._session_manager, pages[-1])
+                return await Tab.create_obj(self._session_manager, valid_target_ids[-1])
 
     async def set_download_path(self, path: str) -> None:
         await self.execute_method(Browser.SetDownloadBehavior(
@@ -172,17 +169,10 @@ class Chromium(BrowserHandler):
     def __init__(
         self,
         options: Options | None = None,
-        remote_port: int | None = None,
-        browser_type: BrowserType | None = None
+        remote_port: int | None = None
     ):
         if options is None:
-            match browser_type:
-                case BrowserType.EDGE:
-                    options = EdgeOptions()
-                case BrowserType.CHROME:
-                    options = ChromeOptions()
-                case _:
-                    options = ChromeOptions()
+            options = ChromeOptions
 
         if remote_port is None:
             remote_port = random.randint(9222, 9322)
@@ -209,7 +199,7 @@ class Chromium(BrowserHandler):
 
     async def _verify_browser_running(self):
         if not await self._is_browser_running():
-            raise Exception('Browser is not running')
+            raise BrowserLaunchError('Browser is not running')
 
     async def _is_browser_running(self, timeout: int = 5) -> bool:
         for _ in range(timeout):
@@ -235,25 +225,27 @@ class Chromium(BrowserHandler):
             self._on_target_destroyed
         )
 
-    async def launch(self):
+    async def launch(self) -> Tab:
         self._process.run()
 
-        self._session = self._session_manager.get_session()
+        self._session = await self._session_manager.get_session()
 
         await self._verify_browser_running()
         await self._init_browser_session()
 
         self._state = BrowserState.STARTED
 
-    async def connect(self, remote_port: int | None = None) -> PageSession:
+        return await self.get_tab()
+
+    async def connect(self, remote_port: int | None = None) -> Tab:
         if remote_port and remote_port != self._info.remote_port:
             self._info.remote_port = remote_port
             self._session_manager = CDPSessionManager(self._info.remote_port)
-        self._session = self._session_manager.get_session()
+        self._session = await self._session_manager.get_session()
         await self._verify_browser_running()
         await self._init_browser_session()
         self._state = BrowserState.STARTED
-        return await self.get_page()
+        return await self.get_tab()
 
     def quit(self) -> None:
         if self._state == BrowserState.STARTED:

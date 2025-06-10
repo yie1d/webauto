@@ -7,9 +7,9 @@ class ProcessState(IntEnum):
     已启动
     已停止
     """
-    INITIALIZED: int = auto()
-    STARTED: int = auto()
-    STOPPED: int = auto()
+    INITIALIZED = auto()
+    STARTED = auto()
+    STOPPED = auto()
 
 
 class BrowserState(IntEnum):
@@ -18,20 +18,20 @@ class BrowserState(IntEnum):
     已启动
     已停止
     """
-    INITIALIZED: int = auto()
-    STARTED: int = auto()
-    STOPPED: int = auto()
+    INITIALIZED = auto()
+    STARTED = auto()
+    STOPPED = auto()
 
 
-class PageSessionState(IntEnum):
-    DISABLED: int = auto()
-    ENABLED: int = auto()
-    CLOSED: int = auto()
+class TabState(IntEnum):
+    DISABLED = auto()
+    ENABLED = auto()
+    CLOSED = auto()
 
 
 class BrowserType(IntEnum):
-    CHROME: int = auto()
-    EDGE: int = auto()
+    CHROME = auto()
+    EDGE = auto()
 
 
 class By(StrEnum):

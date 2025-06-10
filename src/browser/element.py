@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
-from cdpkit.exceptions import NoSuchElement
+from cdpkit.exception import NoSuchElement
 from cdpkit.protocol import DOM, Runtime
 from src.browser.constants import By
 from src.browser.utils import RuntimeParser
@@ -252,11 +252,10 @@ class Element(ElementFinder):
         await self.execute_method(DOM.ScrollIntoViewIfNeeded(
             backend_node_id=await self.backend_node_id,
         ))
-        
+
     async def click(self):
         await self.scroll_into_view()
+        ...
 
     async def input(self, value: str):
         ...
-
-
