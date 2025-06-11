@@ -2,9 +2,10 @@ import asyncio
 import dataclasses
 import random
 import subprocess
+from typing import Literal
 
-from cdpkit.connection import CDPSessionExecutor, CDPSessionManager
-from cdpkit.exception import BrowserLaunchError, TabNotFoundError
+from cdpkit.connection import CDPSessionExecutor, CDPSessionManager, CDPSession
+from cdpkit.exception import BrowserLaunchError, TabNotFoundError, NoValidTabError
 from cdpkit.protocol import Browser, Network, Storage, Target
 from src.browser.constants import BrowserState, ProcessState
 from src.browser.options import ChromeOptions, Options
@@ -110,10 +111,37 @@ class BrowserProcess:
 
 
 class BrowserHandler(CDPSessionExecutor):
-    async def new_tab(self, url: str = '') -> Tab:
-        target_id = (await self.execute_method(Target.CreateTarget(url=url))).targetId
+    def __init__(
+        self,
+        session: CDPSession | None = None,
+        session_manager: CDPSessionManager | None = None
+    ):
+        self._page_load_timeout = 30
+        super().__init__(session=session, session_manager=session_manager)
 
-        return await Tab.create_obj(self._session_manager, target_id)
+    async def set_page_load_timeout(self, timeout: int):
+        self._page_load_timeout = timeout
+
+    async def create_browser_context(self) -> Browser.BrowserContextID:
+        return (await self.execute_method(Target.CreateBrowserContext())).browserContextId
+
+    async def delete_browser_context(self, browser_context_id: Browser.BrowserContextID) -> None:
+        await self.execute_method(Target.DisposeBrowserContext(browser_context_id=browser_context_id))
+
+    async def get_browser_contexts(self) -> list[Browser.BrowserContextID]:
+        return (await self.execute_method(Target.GetBrowserContexts())).browserContextIds
+
+    async def new_tab(self, url: str = '', browser_context_id: Browser.BrowserContextID | None = None) -> Tab:
+        target_id = (await self.execute_method(
+            Target.CreateTarget(url=url, browser_context_id=browser_context_id)
+        )).targetId
+
+        return await Tab.create_obj(
+            session_manager=self._session_manager,
+            target_id=target_id,
+            browser_context_id=browser_context_id,
+            page_load_timeout=self._page_load_timeout
+        )
 
     async def _get_targets(self) -> list[Target.TargetInfo]:
         return (await self.execute_method(Target.GetTargets(filter_=[{
@@ -121,48 +149,110 @@ class BrowserHandler(CDPSessionExecutor):
             'exclude': False
         }]))).targetInfos
 
-    async def get_tab(self, target_id: Target.TargetID | None = None) -> Tab:
+    async def _get_valid_target_infos(self) -> dict[Target.TargetID, Target.TargetInfo]:
         target_infos = await self._get_targets()
 
-        valid_target_ids = [
-            target_info.targetId for target_info in target_infos if 'extension' not in target_info.url
-        ]
+        valid_target_infos = {
+            target_info.targetId: target_info for target_info in target_infos if 'extension' not in target_info.url
+        }
+        return valid_target_infos
+
+    async def get_tab(self, target_id: Target.TargetID | None = None) -> Tab:
+        valid_target_infos = await self._get_valid_target_infos()
 
         if target_id is not None:
-            if target_id not in valid_target_ids:
+            if target_id not in valid_target_infos:
                 raise TabNotFoundError(f'Tab {target_id} not found')
-            return await Tab.create_obj(self._session_manager, target_id)
+            return await Tab.create_obj(
+                session_manager=self._session_manager,
+                target_id=target_id,
+                browser_context_id=valid_target_infos[target_id].browserContextId,
+                page_load_timeout=self._page_load_timeout
+            )
         else:
-            if len(valid_target_ids) == 0:
+            if not valid_target_infos:
                 return await self.new_tab()
             else:
-                return await Tab.create_obj(self._session_manager, valid_target_ids[-1])
+                last_target_id = list(valid_target_infos.keys())[-1]
+                return await Tab.create_obj(
+                    session_manager=self._session_manager,
+                    target_id=last_target_id,
+                    browser_context_id=valid_target_infos[last_target_id].browserContextId,
+                    page_load_timeout=self._page_load_timeout
+                )
 
-    async def set_download_path(self, path: str) -> None:
+    async def set_download_path(self, path: str, browser_context_id: Browser.BrowserContextID | None = None) -> None:
         await self.execute_method(Browser.SetDownloadBehavior(
             behavior='allow',
+            browser_context_id=browser_context_id,
             download_path=path
         ))
 
-    async def set_cookies(self, cookies: list[dict]):
-        """
-        Sets cookies in the browser.
+    async def set_download_behavior(
+        self,
+        behavior: Literal['deny', 'allow', 'allowAndName', 'default'],
+        download_path: str | None = None,
+        browser_context_id: str | None = None,
+        events_enabled: bool = False,
+    ):
+        return await self.execute_method(
+            Browser.SetDownloadBehavior(
+                behavior=behavior,
+                download_path=download_path,
+                browser_context_id=browser_context_id,
+                events_enabled=events_enabled
+            )
+        )
 
-        Args:
-            cookies (list[dict]): A list of dictionaries containing the cookie data.
-        """
-        await self.execute_method(Storage.SetCookies(cookies=cookies))
-        await self.execute_method(Network.SetCookies(cookies=cookies))
+    async def set_cookies(self, cookies: list[dict], browser_context_id: Browser.BrowserContextID | None = None):
+        cookies = [Network.CookieParam.model_validate(cookie) for cookie in cookies]
+        await self.execute_method(Storage.SetCookies(cookies=cookies, browser_context_id=browser_context_id))
 
-    async def delete_all_cookies(self):
-        """
-        Deletes all cookies from the browser.
-        """
-        await self.execute_method(Storage.ClearCookies())
-        await self.execute_method(Network.ClearBrowserCookies())
+    async def delete_all_cookies(self, browser_context_id: Browser.BrowserContextID | None = None):
+        await self.execute_method(Storage.ClearCookies(browser_context_id=browser_context_id))
 
-    async def get_cookies(self) -> list[Network.Cookie]:
-        return (await self.execute_method(Storage.GetCookies())).cookies
+    async def get_cookies(self, browser_context_id: Browser.BrowserContextID | None = None) -> list[Network.Cookie]:
+        return (await self.execute_method(Storage.GetCookies(browser_context_id=browser_context_id))).cookies
+
+    async def get_window_id_by_target(self, target_id: Target.TargetID) -> int:
+        return (await self.execute_method(
+            Browser.GetWindowForTarget(target_id=target_id)
+        )).windowId
+
+    async def get_window_id_by_tab(self, tab: Tab) -> int:
+        return await self.get_window_id_by_target(tab.target_id)
+
+    async def get_window_id(self) -> int:
+        valid_target_infos = await self._get_valid_target_infos()
+
+        if not valid_target_infos:
+            raise NoValidTabError
+
+        last_target_id = list(valid_target_infos.keys())[-1]
+
+        return await self.get_window_id_by_target(last_target_id)
+
+    async def set_window_maximized(self, window_id: int | None = None) -> None:
+        await self.execute_method(Browser.SetWindowBounds(
+            window_id=await self.get_window_id() if window_id is None else window_id,
+            bounds=Browser.Bounds(windowState=Browser.WindowState.MAXIMIZED)
+        ))
+
+    async def set_window_minimized(self, window_id: int | None = None) -> None:
+        await self.execute_method(Browser.SetWindowBounds(
+            window_id=await self.get_window_id() if window_id is None else window_id,
+            bounds=Browser.Bounds(windowState=Browser.WindowState.MINIMIZED)
+        ))
+
+    async def set_window_bounds(self, bounds: Browser.Bounds | dict, window_id: int | None = None):
+        if isinstance(bounds, dict):
+            bounds = Browser.Bounds.model_validate(bounds)
+
+        await self.execute_method(Browser.SetWindowBounds(
+            window_id=await self.get_window_id() if window_id is None else window_id,
+            bounds=bounds
+        ))
+
 
 
 class Chromium(BrowserHandler):
@@ -172,7 +262,7 @@ class Chromium(BrowserHandler):
         remote_port: int | None = None
     ):
         if options is None:
-            options = ChromeOptions
+            options = ChromeOptions()
 
         if remote_port is None:
             remote_port = random.randint(9222, 9322)
