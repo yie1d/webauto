@@ -1,3 +1,4 @@
+import base64
 import shutil
 import time
 from pathlib import Path
@@ -11,7 +12,7 @@ class TempDirectoryFactory(metaclass=SingletonMeta):
     INITIALIZED = False
 
     def __init__(self):
-        if self.INITIALIZED is False:
+        if not self.INITIALIZED:
             self.INITIALIZED = True
             self._temp_dirs = []
             self._temp_dir_factory = TemporaryDirectory
@@ -53,3 +54,21 @@ class TempDirectoryFactory(metaclass=SingletonMeta):
     def clean_up(self):
         for temp_dir in self._temp_dirs:
             shutil.rmtree(temp_dir.name, onerror=self._handle_cleanup_error)
+
+
+def decode_base64_to_bytes(image: str) -> bytes:
+    return base64.b64decode(image.encode('utf-8'))
+
+
+def get_path_ext(path: Path | str | None) -> str | None:
+    if path is None:
+        return None
+
+    if isinstance(path, str):
+        path = Path(path)
+    elif isinstance(path, Path):
+        pass
+    else:
+        raise TypeError(f'Invalid path type {type(path)}, only support str and Path type')
+
+    return path.suffix.lower()

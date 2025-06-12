@@ -4,8 +4,8 @@ import random
 import subprocess
 from typing import Literal
 
-from cdpkit.connection import CDPSessionExecutor, CDPSessionManager, CDPSession
-from cdpkit.exception import BrowserLaunchError, TabNotFoundError, NoValidTabError
+from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
+from cdpkit.exception import BrowserLaunchError, NoValidTabError, TabNotFoundError
 from cdpkit.protocol import Browser, Network, Storage, Target
 from src.browser.constants import BrowserState, ProcessState
 from src.browser.options import ChromeOptions, Options
@@ -252,7 +252,6 @@ class BrowserHandler(CDPSessionExecutor):
             window_id=await self.get_window_id() if window_id is None else window_id,
             bounds=bounds
         ))
-
 
 
 class Chromium(BrowserHandler):

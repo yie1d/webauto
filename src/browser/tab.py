@@ -1,10 +1,15 @@
 import asyncio
+from pathlib import Path
+from typing import Literal
+
+import aiofiles
 
 from cdpkit.connection import CDPSession, CDPSessionManager
-from cdpkit.protocol import DOM, RESULT_TYPE, CDPEvent, CDPMethod, Page, Runtime, Target, Browser
+from cdpkit.protocol import DOM, RESULT_TYPE, Browser, CDPEvent, CDPMethod, Page, Runtime, Target
 from src.browser.constants import TabState
 from src.browser.element import ElementFinder
 from src.logger import logger
+from src.utils import decode_base64_to_bytes, get_path_ext
 
 
 class Tab(ElementFinder):
@@ -128,7 +133,7 @@ class Tab(ElementFinder):
         await self.execute_method(Page.BringToFront())
 
     async def close(self):
-        await self.execute_method(Target.CloseTarget(target_id=self._target_id))
+        await self.execute_method(Page.Close())
         self._state = TabState.CLOSED
 
     async def get(self, url: str):
@@ -149,7 +154,42 @@ class Tab(ElementFinder):
             page_load_timeout=self._page_load_timeout
         )
 
-    async def refresh(self):
-        await self.execute_method(Page.Reload())
+    async def refresh(self, ignore_cache: bool | None = None, script_to_evaluate_on_load: str | None = None,):
+        await self.execute_method(Page.Reload(
+            ignore_cache=ignore_cache,
+            script_to_evaluate_on_load=script_to_evaluate_on_load
+        ))
 
         await self._init_tab()
+
+    @staticmethod
+    def get_img_format(path: Path | str | None) -> Literal['jpeg', 'png', 'webp'] | None:
+        ext = get_path_ext(path)
+
+        if ext in ['jpeg', 'png', 'webp']:
+            return ext
+        else:
+            raise TypeError(f'Invalid image format: {ext}, only jpeg, png, webp are supported')
+
+    async def take_screenshot(
+        self,
+        path: Path | str | None = None,
+        quality: int = 100,
+        as_base64: bool = False
+    ) -> str | None:
+        if path is None and as_base64 is False:
+            raise ValueError('Either path or as_base64 must be specified')
+
+        img_base64 = (await self.execute_method(Page.CaptureScreenshot(
+            format_=self.get_img_format(path),
+            quality=quality,
+        ))).data
+
+        if as_base64:
+            return img_base64
+
+        if path:
+            async with aiofiles.open(path, 'wb') as f:
+                await f.write(decode_base64_to_bytes(img_base64))
+
+        return None
