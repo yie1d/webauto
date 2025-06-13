@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from bs4 import BeautifulSoup
 
 from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
 from cdpkit.exception import NoSuchElement
@@ -233,6 +234,30 @@ class Element(ElementFinder):
         return await self.get_attribute('id')
 
     @property
+    async def is_enabled(self) -> bool:
+        disabled = await self.get_attribute('disabled')
+        if disabled is None:
+            return True
+        return False
+
+    @property
+    async def text(self) -> str:
+        soup = BeautifulSoup(await self.outer_html, 'html.parser')
+        return soup.get_text(strip=True)
+
+    @property
+    async def bounds(self) -> list[float]:
+        return (await self.execute_method(DOM.GetBoxModel(
+            object_id=await self.object_id
+        ))).model.content
+
+    @property
+    async def outer_html(self) -> str:
+        return (await self.execute_method(DOM.GetOuterHTML(
+            object_id=await self.object_id
+        ))).outerHTML
+
+    @property
     async def attrs(self) -> dict[str, str]:
         return await self.get_attribute()
 
@@ -258,4 +283,5 @@ class Element(ElementFinder):
         ...
 
     async def input(self, value: str):
+        await self.scroll_into_view()
         ...
