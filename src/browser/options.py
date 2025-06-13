@@ -62,11 +62,13 @@ class Options:
             self._arguments.remove(argument)
 
     @staticmethod
-    def _validate_browser_paths(paths: list[str]) -> str:
+    def _validate_browser_paths(paths: list[str]) -> str | None:
         for path in paths:
             _path = Path(path)
             if _path.exists() and _path.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
                 return path
+
+        return None
 
     def add_default_arguments(self):
         self.add_argument('--no-first-run')

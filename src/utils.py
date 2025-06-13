@@ -71,4 +71,4 @@ def get_path_ext(path: Path | str | None) -> str | None:
     else:
         raise TypeError(f'Invalid path type {type(path)}, only support str and Path type')
 
-    return path.suffix.lower()
+    return path.suffix.lower().removeprefix('.')

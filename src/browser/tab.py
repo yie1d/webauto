@@ -193,3 +193,31 @@ class Tab(ElementFinder):
                 await f.write(decode_base64_to_bytes(img_base64))
 
         return None
+
+    async def print_to_pdf(
+        self,
+        path: str | None = None,
+        landscape: bool = False,
+        display_header_footer: bool = False,
+        print_background: bool = True,
+        scale: float = 1.0,
+        as_base64: bool = False,
+    ) -> str | None:
+        if path is None and as_base64 is False:
+            raise ValueError('Either path or as_base64 must be specified')
+
+        pdf_data = (await self.execute_method(Page.PrintToPDF(
+            landscape=landscape,
+            display_header_footer=display_header_footer,
+            print_background=print_background,
+            scale=scale
+        ))).data
+
+        if as_base64:
+            return pdf_data
+
+        if path:
+            async with aiofiles.open(path, 'wb') as f:
+                await f.write(decode_base64_to_bytes(pdf_data))
+
+        return None

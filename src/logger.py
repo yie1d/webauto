@@ -2,7 +2,6 @@ import sys
 from enum import IntEnum
 
 from loguru import logger as _loguru_logger
-from loguru import AsyncHandlerConfig
 
 __all__ = [
     'logger'
@@ -40,14 +39,12 @@ def set_logger(
         except KeyError:
             raise KeyError(f'Invalid log level {print_level}')
 
-    _loguru_logger.configure(
-        handlers=[AsyncHandlerConfig(
-            sink=sys.stdout,
-            format=format_,
-            colorize=True,
-            level=print_level.value,
-            enqueue=True
-        )]
+    _loguru_logger.add(
+        sink=sys.stdout,
+        format=format_,
+        colorize=True,
+        level=print_level.value,
+        enqueue=True
     )
     return _loguru_logger
 
