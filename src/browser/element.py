@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Literal
@@ -9,7 +10,7 @@ from bs4 import BeautifulSoup
 
 from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
 from cdpkit.exception import NoSuchElement
-from cdpkit.protocol import DOM, Page, Runtime
+from cdpkit.protocol import DOM, Input, Page, Runtime
 from src.browser.constants import By
 from src.browser.utils import RuntimeParser
 from src.utils import decode_base64_to_bytes, get_img_format
@@ -334,11 +335,35 @@ class Element(ElementFinder):
 
     async def click(self):
         await self.scroll_into_view()
-        ...
+
+        bounds = await self.bounds
+        center = (
+            bounds['x'] + bounds['width'] / 2,
+            bounds['y'] + bounds['height'] / 2
+        )
+
+        await self.execute_method(Input.DispatchMouseEvent(
+            type_='mousePressed',
+            x=round(center[0], 2),
+            y=round(center[1], 2),
+            button=Input.MouseButton.LEFT,
+            click_count=1
+        ))
+
+        await asyncio.sleep(.1)
+
+        await self.execute_method(Input.DispatchMouseEvent(
+            type_='mouseReleased',
+            x=round(center[0], 2),
+            y=round(center[1], 2),
+            button=Input.MouseButton.LEFT,
+            click_count=1
+        ))
 
     async def input(self, value: str):
         await self.scroll_into_view()
-        ...
+
+        await self.execute_method(Input.InsertText(text=value))
 
     async def execute_script(self, script: str):
         return await self.execute_method(
