@@ -3,6 +3,7 @@ import shutil
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Literal
 
 from src.logger import logger
 from src.singleton import SingletonMeta
@@ -72,3 +73,12 @@ def get_path_ext(path: Path | str | None) -> str | None:
         raise TypeError(f'Invalid path type {type(path)}, only support str and Path type')
 
     return path.suffix.lower().removeprefix('.')
+
+
+def get_img_format(path: Path | str | None) -> Literal['jpeg', 'png', 'webp'] | None:
+    ext = get_path_ext(path)
+
+    if ext in ['jpeg', 'png', 'webp']:
+        return ext
+    else:
+        raise TypeError(f'Invalid image format: {ext}, only jpeg, png, webp are supported')

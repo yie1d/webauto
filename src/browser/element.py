@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Literal
+
+import aiofiles
 from bs4 import BeautifulSoup
 
 from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
 from cdpkit.exception import NoSuchElement
-from cdpkit.protocol import DOM, Runtime
+from cdpkit.protocol import DOM, Page, Runtime
 from src.browser.constants import By
 from src.browser.utils import RuntimeParser
+from src.utils import decode_base64_to_bytes, get_img_format
 
 
 class ElementFinder(CDPSessionExecutor):
@@ -246,10 +251,26 @@ class Element(ElementFinder):
         return soup.get_text(strip=True)
 
     @property
-    async def bounds(self) -> list[float]:
-        return (await self.execute_method(DOM.GetBoxModel(
-            object_id=await self.object_id
-        ))).model.content
+    async def bounds(self) -> dict[str, int | float]:
+        # box_model = (await self.execute_method(DOM.GetBoxModel(
+        #     object_id=await self.object_id
+        # ))).model
+        #
+        # return {
+        #     'x': box_model.content[0],
+        #     'y': box_model.content[1],
+        #     'height': box_model.height,
+        #     'width': box_model.width
+        # }
+
+        result = (await self.execute_script(
+            script="""
+                function() {
+                    return JSON.stringify(this.getBoundingClientRect());
+                }"""
+        )).result
+
+        return json.loads(await RuntimeParser.parse_remote_object(self, result))
 
     @property
     async def outer_html(self) -> str:
@@ -278,6 +299,39 @@ class Element(ElementFinder):
             backend_node_id=await self.backend_node_id,
         ))
 
+    async def take_screenshot(
+        self,
+        path: Path | str | None = None,
+        quality: int = 100,
+        as_base64: bool = False
+    ) -> str | None:
+        if path is None and as_base64 is False:
+            raise ValueError('Either path or as_base64 must be specified')
+
+        bounds = await self.bounds
+        clip = Page.Viewport.model_validate({
+            'x': bounds['x'],
+            'y': bounds['y'],
+            'width': bounds['width'],
+            'height': bounds['height'],
+            'scale': 1
+        })
+
+        img_base64 = (await self.execute_method(Page.CaptureScreenshot(
+            format_=get_img_format(path),
+            clip=clip,
+            quality=quality,
+        ))).data
+
+        if as_base64:
+            return img_base64
+
+        if path:
+            async with aiofiles.open(path, 'wb') as f:
+                await f.write(decode_base64_to_bytes(img_base64))
+
+        return None
+
     async def click(self):
         await self.scroll_into_view()
         ...
@@ -285,3 +339,11 @@ class Element(ElementFinder):
     async def input(self, value: str):
         await self.scroll_into_view()
         ...
+
+    async def execute_script(self, script: str):
+        return await self.execute_method(
+            Runtime.CallFunctionOn(
+                object_id=await self.object_id,
+                function_declaration=script
+            )
+        )

@@ -38,9 +38,7 @@ class RuntimeParser:
                         return None
                     case _:
                         raise Exception(f"It needs to be implemented {remote_object.model_dump()}")
-            case 'number':
+            case 'string' | 'number':
                 return remote_object.value
-            case 'function':
-                raise Exception(f"It needs to be implemented {remote_object.model_dump()}")
             case _:
                 raise Exception(f"It needs to be implemented {remote_object.model_dump()}")

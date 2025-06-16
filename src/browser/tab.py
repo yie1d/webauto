@@ -1,6 +1,5 @@
 import asyncio
 from pathlib import Path
-from typing import Literal
 
 import aiofiles
 
@@ -9,7 +8,7 @@ from cdpkit.protocol import DOM, RESULT_TYPE, Browser, CDPEvent, CDPMethod, Page
 from src.browser.constants import TabState
 from src.browser.element import ElementFinder
 from src.logger import logger
-from src.utils import decode_base64_to_bytes, get_path_ext
+from src.utils import decode_base64_to_bytes, get_img_format
 
 
 class Tab(ElementFinder):
@@ -162,15 +161,6 @@ class Tab(ElementFinder):
 
         await self._init_tab()
 
-    @staticmethod
-    def get_img_format(path: Path | str | None) -> Literal['jpeg', 'png', 'webp'] | None:
-        ext = get_path_ext(path)
-
-        if ext in ['jpeg', 'png', 'webp']:
-            return ext
-        else:
-            raise TypeError(f'Invalid image format: {ext}, only jpeg, png, webp are supported')
-
     async def take_screenshot(
         self,
         path: Path | str | None = None,
@@ -181,7 +171,7 @@ class Tab(ElementFinder):
             raise ValueError('Either path or as_base64 must be specified')
 
         img_base64 = (await self.execute_method(Page.CaptureScreenshot(
-            format_=self.get_img_format(path),
+            format_=get_img_format(path),
             quality=quality,
         ))).data
 
