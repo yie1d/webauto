@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import aiofiles
@@ -211,3 +213,18 @@ class Tab(ElementFinder):
                 await f.write(decode_base64_to_bytes(pdf_data))
 
         return None
+
+    @asynccontextmanager
+    async def expect_file_chooser(
+        self, files: str | Path | list[str | Path]
+    ) -> AsyncGenerator[None]:
+        async def event_handler(event: Page.FileChooserOpened):
+            await self.execute_method(DOM.SetFileInputFiles(files=files, backend_node_id=event.backendNodeId))
+
+        await self.execute_method(Page.SetInterceptFileChooserDialog(enabled=True))
+
+        await self.on(Page.FileChooserOpened, event_handler, temporary=True)
+
+        yield
+
+        await self.execute_method(Page.SetInterceptFileChooserDialog(enabled=False))

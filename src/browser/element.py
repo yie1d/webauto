@@ -9,7 +9,7 @@ import aiofiles
 from bs4 import BeautifulSoup
 
 from cdpkit.connection import CDPSession, CDPSessionExecutor, CDPSessionManager
-from cdpkit.exception import NoSuchElement
+from cdpkit.exception import ElementNotFileInput, NoSuchElement
 from cdpkit.protocol import DOM, Input, Page, Runtime
 from src.browser.constants import By
 from src.browser.utils import RuntimeParser
@@ -229,7 +229,7 @@ class Element(ElementFinder):
 
     @property
     async def tag(self) -> str:
-        return (await self.node).nodeName
+        return (await self.node).nodeName.lower()
 
     @property
     async def class_name(self) -> str | None:
@@ -372,3 +372,9 @@ class Element(ElementFinder):
                 function_declaration=script
             )
         )
+
+    async def set_input_files(self, files: list[str]):
+        if self.tag != 'input' or self.get_attribute('type') != 'file':
+            raise ElementNotFileInput('Element is not a file input. '
+                                      'Please use Tab.expect_file_chooser to handle file chooser')
+        await self.execute_method(DOM.SetFileInputFiles(files=files, backend_node_id=await self.backend_node_id))
