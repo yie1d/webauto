@@ -25,12 +25,19 @@ class _ProcessPopenAnnotation:
         _handler: GetCoreSchemaHandler,
     ) -> core_schema.CoreSchema:
         return core_schema.json_or_python_schema(
-            json_schema=core_schema.int_schema(),
+            json_schema=core_schema.str_schema(),
             python_schema=core_schema.is_instance_schema(subprocess.Popen),
             serialization=core_schema.plain_serializer_function_ser_schema(
-                lambda instance: {'pid': instance.pid}
-            ),
+                cls._serialize_popen
+            )
         )
+
+    @staticmethod
+    def _serialize_popen(value: subprocess.Popen) -> dict[str, Any]:
+        return {
+            'pid': value.pid,
+            'args': value.args
+        }
 
 
 class BrowserProcess(BaseModel):
