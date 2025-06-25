@@ -1,13 +1,11 @@
 [project]
-name = "asynccdp"
+name = "webauto"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "beautifulsoup4>=4.13.4",
-    "cdpkits",
-    "pydantic>=2.11.4",
+    "cdpkits>=1.2.7",
 ]
 
 [tool.ruff.lint]
@@ -27,3 +25,11 @@ ruff = [
 [tool.ruff]
 line-length = 120
 target-version = "py313"
+
+[tool.uv]
+build-constraint-dependencies = ["setuptools"]
+build-backend = 'setuptools.build_meta'
+
+[tool.setuptools.packages.find]
+include = ['webauto*']
+exclude = ['tests*', 'demo*', 'src*', 'logs*']
