@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cdpkit.exception import ArgumentAlreadyExistsInOptions
 from cdpkit.logger import logger
@@ -8,7 +8,7 @@ class Options(BaseModel):
     executable_path: str = ''
     headless: bool = False
     user_data_dir: str = ''
-    arguments: list[str] | None = None
+    arguments: list[str] = Field(default_factory=list)
 
     def add_argument(self, argument: str) -> None:
         if not isinstance(argument, str):
