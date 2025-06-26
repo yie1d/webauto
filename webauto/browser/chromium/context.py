@@ -4,7 +4,9 @@ from typing import Any
 
 from pydantic import BaseModel, PrivateAttr
 
+from cdpkit.connection import CDPSessionExecutor
 from cdpkit.logger import logger
+from cdpkit.protocol import Browser, Target
 from webauto.browser.chromium.options import Options
 
 
@@ -43,3 +45,39 @@ class BrowserProcess(BaseModel):
                 self._process.kill()
                 logger.info('process killed')
             self._process = None
+
+
+class BrowserContext(CDPSessionExecutor):
+    context_id: Browser.BrowserContextID
+
+
+class ContextManager(CDPSessionExecutor):
+    browser_type: str
+
+    contexts: list[Browser.BrowserContextID] = PrivateAttr(default_factory=list)
+
+    async def init_manager(self) -> 'ContextManager':
+        self.contexts = await self.get_browser_contexts()
+        return self
+
+    async def new_context(self) -> BrowserContext:
+        browser_context_id = (await self.execute_method(Target.CreateBrowserContext())).browserContextId
+        self.contexts.append(browser_context_id)
+
+        return BrowserContext(
+            context_id=browser_context_id,
+            session_manager=self.session_manager,
+            session=self.session
+        )
+
+    async def delete_context(self, browser_context: Browser.BrowserContextID | BrowserContext) -> None:
+        if isinstance(browser_context, BrowserContext):
+            browser_context_id = browser_context.context_id
+        else:
+            browser_context_id = browser_context
+
+        self.contexts.remove(browser_context_id)
+        await self.execute_method(Target.DisposeBrowserContext(browser_context_id=browser_context_id))
+
+    async def get_browser_contexts(self) -> list[Browser.BrowserContextID]:
+        return (await self.execute_method(Target.GetBrowserContexts())).browserContextIds

@@ -3,12 +3,12 @@ import platform
 import stat
 from pathlib import Path
 
-from pydantic import PrivateAttr
+from pydantic import BaseModel, PrivateAttr
 
 from cdpkit.connection import CDPSessionExecutor, CDPSessionManager
 from cdpkit.exception import BrowserLaunchError, ExecutableNotFoundError
 from cdpkit.protocol import Target
-from webauto.browser.chromium.context import BrowserInfo, BrowserProcess
+from webauto.browser.chromium.context import BrowserInfo, BrowserProcess, ContextManager
 from webauto.browser.chromium.options import Options
 
 
@@ -23,7 +23,7 @@ class BrowserHandler(CDPSessionExecutor):
         ...
 
 
-class BrowserType(BrowserHandler):
+class BrowserType(BaseModel):
     name: str
     browser_path_dict: dict[str, list[str]] | None = None
 
@@ -32,19 +32,19 @@ class BrowserType(BrowserHandler):
 
     async def connect(
         self,
-        host: str,
-        port: int | str
-    ):
+        port: int | str,
+        host: str | None = None,
+    ) -> ContextManager:
         self._info = BrowserInfo(host=host, remote_port=int(port))
         self._process = BrowserProcess(browser_info=self._info)
 
-        await self._init_connect()
+        return await self._init_connect()
 
     async def launch(
         self,
-        options: Options | None,
+        options: Options | None = None,
         port: int | str | None = None
-    ):
+    ) -> ContextManager:
         if options is None:
             options = Options()
 
@@ -61,11 +61,7 @@ class BrowserType(BrowserHandler):
         self._process = BrowserProcess(browser_info=self._info)
         self._process.run()
 
-        await self._init_connect()
-
-    async def _verify_browser_running(self):
-        if not await self._is_browser_running():
-            raise BrowserLaunchError('Browser is not running')
+        return await self._init_connect()
 
     async def _is_browser_running(self, timeout: int = 5) -> bool:
         for _ in range(timeout):
@@ -74,24 +70,18 @@ class BrowserType(BrowserHandler):
             await asyncio.sleep(1)
         return False
 
-    async def _init_browser_session(self):
-        await self.execute_method(Target.SetDiscoverTargets(discover=True))
-        await self.on(
-            Target.TargetCreated,
-            self._on_target_created
-        )
-        await self.on(
-            Target.TargetDestroyed,
-            self._on_target_destroyed
-        )
+    async def _init_connect(self) -> ContextManager:
+        session_manager = CDPSessionManager(ws_endpoint=f'{self._info.host}:{self._info.remote_port}')
+        session = await self._session_manager.get_session()
 
-    async def _init_connect(self):
-        self._session_manager = CDPSessionManager(ws_endpoint=f'{self._info.host}:{self._info.remote_port}')
-        self._session = await self._session_manager.get_session()
-        await self._verify_browser_running()
-        await self._init_browser_session()
+        if not await self._is_browser_running():
+            raise BrowserLaunchError('Browser is not running')
 
-        return await self.get_tab()
+        return await ContextManager(
+            browser_type=self.name,
+            session_manager=session_manager,
+            session=session
+        ).init_manager()
 
     @staticmethod
     def _validate_browser_paths(paths: list[str]) -> str | None:
