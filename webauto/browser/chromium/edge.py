@@ -3,7 +3,7 @@ from webauto.browser.chromium.chromium import BrowserType
 
 class Edge(BrowserType):
     name: str = 'edge'
-    browser_path_dict = {
+    browser_path_dict: dict[str, list[str]] = {
         'Windows': [
             (
                 r'C:\Program Files\Microsoft\Edge\Application\msedge.exe'

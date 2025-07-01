@@ -1,3 +1,4 @@
+
 from pydantic import BaseModel, Field
 
 from cdpkit.exception import ArgumentAlreadyExistsInOptions
@@ -59,10 +60,9 @@ class Options(BaseModel):
             self.add_argument(f'{user_data_dir_arg}={self.user_data_dir}')
         else:
             if user_data_dir_arg not in options_args_dict:
-                # todo set temp dir
-                ...
-                # temp_dir = TempDirectoryFactory().create_temp_dir('chromium_user_data_dir-')
-                # self.add_argument(f'{user_data_dir_arg}={temp_dir.name}')
+                # temp_dir = TemporaryDirectory('chromium_user_data_dir-', delete=False)
+                # todo change
+                self.add_argument(rf'{user_data_dir_arg}=D:\study\program\spider\mashangpa\tmp\chrome-debug')
 
     def check(self, remote_port: int):
         options_args_dict = {arg.split('=')[0]: arg for inx, arg in enumerate(self.arguments)}

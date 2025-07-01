@@ -3,7 +3,7 @@ import platform
 import stat
 from pathlib import Path
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import PrivateAttr
 
 from cdpkit.connection import CDPSessionExecutor, CDPSessionManager
 from cdpkit.exception import BrowserLaunchError, ExecutableNotFoundError
@@ -23,17 +23,17 @@ class BrowserHandler(CDPSessionExecutor):
         ...
 
 
-class BrowserType(BaseModel):
+class BrowserType(CDPSessionExecutor):
     name: str
     browser_path_dict: dict[str, list[str]] | None = None
 
-    _info: BrowserInfo | None = PrivateAttr()
-    _process: BrowserProcess | None = PrivateAttr()
+    _info: BrowserInfo | None = PrivateAttr(default=None)
+    _process: BrowserProcess | None = PrivateAttr(default=None)
 
     async def connect(
         self,
         port: int | str,
-        host: str | None = None,
+        host: str = 'localhost',
     ) -> ContextManager:
         self._info = BrowserInfo(host=host, remote_port=int(port))
         self._process = BrowserProcess(browser_info=self._info)
@@ -54,8 +54,8 @@ class BrowserType(BaseModel):
             self._validate_browser_paths([options.executable_path])
 
         self._info = BrowserInfo(
-            options=options,
-            remote_port=port
+            remote_port=port,
+            options=options
         )
 
         self._process = BrowserProcess(browser_info=self._info)
@@ -65,22 +65,22 @@ class BrowserType(BaseModel):
 
     async def _is_browser_running(self, timeout: int = 5) -> bool:
         for _ in range(timeout):
-            if await self._session.ping():
+            if await self.session.ping():
                 return True
             await asyncio.sleep(1)
         return False
 
     async def _init_connect(self) -> ContextManager:
-        session_manager = CDPSessionManager(ws_endpoint=f'{self._info.host}:{self._info.remote_port}')
-        session = await self._session_manager.get_session()
+        self.session_manager = CDPSessionManager(ws_endpoint=f'{self._info.host}:{self._info.remote_port}')
+        self.session = await self.session_manager.get_session()
 
         if not await self._is_browser_running():
             raise BrowserLaunchError('Browser is not running')
 
         return await ContextManager(
             browser_type=self.name,
-            session_manager=session_manager,
-            session=session
+            session_manager=self.session_manager,
+            session=self.session
         ).init_manager()
 
     @staticmethod
