@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import json
+from pathlib import Path
 from typing import Literal
 
+import aiofiles
 from pydantic import PrivateAttr
 
 from cdpkit.connection import CDPSessionExecutor
-from cdpkit.exception import NoSuchElement, ParamsMustSpecified
-from cdpkit.protocol import DOM, Runtime
+from cdpkit.exception import ElementNotFileInput, NoSuchElement, ParamsMustSpecified
+from cdpkit.protocol import DOM, Input, Page, Runtime
 from webauto.browser.constants import By
-from webauto.browser.utils import RuntimeParser
+from webauto.browser.utils import RuntimeParser, decode_base64_to_bytes, get_img_format
 
 
 class ElementFinder(CDPSessionExecutor):
@@ -68,17 +72,26 @@ class ElementFinder(CDPSessionExecutor):
             node = (await self.execute_method(DOM.DescribeNode(node_id=node_id))).node
 
         return Element(
-            session=self._session,
-            session_manager=self._session_manager,
+            session=self.session,
+            session_manager=self.session_manager,
             backend_node_id=node.backendNodeId
         )
 
-    async def find_element_by_selector(
+    async def find_element_by_selector(self, selector: str) -> Element:
+        elements = await self._find_element_by_selector(selector)
+        if not elements:
+            raise NoSuchElement
+        return elements[0]
+
+    async def find_elements_by_selector(self, selector: str) -> list[Element]:
+        return await self._find_element_by_selector(selector, mode='multiple')
+
+    async def _find_element_by_selector(
         self,
         selector: str,
         mode: Literal['single', 'multiple'] = 'single'
     ) -> list[Element]:
-        backend_node_ids = [await self.backend_node_id]
+        backend_node_ids = [self.backend_node_id]
 
         node_id = (await self.execute_method(
             DOM.PushNodesByBackendIdsToFrontend(backend_node_ids=backend_node_ids)
@@ -91,7 +104,16 @@ class ElementFinder(CDPSessionExecutor):
 
         return [await self._make_element(node_id=node_id) for node_id in node_ids]
 
-    async def find_element_by_xpath(
+    async def find_element_by_xpath(self, xpath: str) -> Element:
+        elements = await self._find_element_by_xpath(xpath)
+        if not elements:
+            raise NoSuchElement
+        return elements[0]
+
+    async def find_elements_by_xpath(self, xpath: str) -> list[Element]:
+        return await self._find_element_by_xpath(xpath, mode='multiple')
+
+    async def _find_element_by_xpath(
         self,
         xpath: str,
         mode: Literal['single', 'multiple'] = 'single'
@@ -173,19 +195,168 @@ class ElementFinder(CDPSessionExecutor):
         value = await self._convert_find_by_value(by, value)
 
         if by == By.XPATH:
-            return (await self.find_element_by_xpath(value, mode='single'))[0]
+            return await self.find_element_by_xpath(value)
         else:
-            return (await self.find_element_by_selector(value, mode='single'))[0]
+            return await self.find_element_by_selector(value)
 
     async def find_elements(self, by: By, value: str) -> list[Element]:
         value = await self._convert_find_by_value(by, value)
 
         if by == By.XPATH:
-            return await self.find_element_by_xpath(value, mode='multiple')
+            return await self.find_elements_by_xpath(value)
         else:
-            return await self.find_element_by_selector(value, mode='multiple')
+            return await self.find_elements_by_selector(value)
 
 
 class Element(ElementFinder):
-    # todo
-    ...
+    @property
+    async def value(self) -> str | None:
+        return await self.get_attribute('value')
+
+    @property
+    async def tag(self) -> str:
+        return (await self.node).nodeName.lower()
+
+    @property
+    async def class_name(self) -> str | None:
+        return await self.get_attribute('class')
+
+    @property
+    async def id(self) -> str | None:
+        return await self.get_attribute('id')
+
+    @property
+    async def is_enabled(self) -> bool:
+        disabled = await self.get_attribute('disabled')
+        if disabled is None:
+            return True
+        return False
+
+    @property
+    async def text(self) -> str:
+        result = (await self.execute_script(
+            script="""
+            function() {
+                return this.textContent;
+            }"""
+
+        )).result
+        return await RuntimeParser.parse_remote_object(self, remote_object=result)
+
+    @property
+    async def bounds(self) -> dict[str, int | float]:
+
+        result = (await self.execute_script(
+            script="""
+                    function() {
+                        return JSON.stringify(this.getBoundingClientRect());
+                    }"""
+        )).result
+
+        return json.loads(await RuntimeParser.parse_remote_object(self, result))
+
+    @property
+    async def outer_html(self) -> str:
+        return (await self.execute_method(DOM.GetOuterHTML(
+            object_id=await self.object_id
+        ))).outerHTML
+
+    @property
+    async def attrs(self) -> dict[str, str]:
+        return await self.get_attribute()
+
+    async def get_attribute(self, name: str | None = None) -> dict[str, str] | str | None:
+        attrs = {}
+
+        _attrs = (await self.node).attributes
+        for inx in range(0, len(_attrs), 2):
+            if name == _attrs[inx]:
+                return _attrs[inx + 1]
+            else:
+                attrs[_attrs[inx]] = _attrs[inx + 1]
+
+        return None if name is None else attrs
+
+    async def scroll_into_view(self):
+        await self.execute_method(DOM.ScrollIntoViewIfNeeded(
+            backend_node_id=self.backend_node_id,
+        ))
+
+    async def take_screenshot(
+        self,
+        path: Path | str | None = None,
+        quality: int = 100,
+        as_base64: bool = False
+    ) -> str | None:
+        if path is None and as_base64 is False:
+            raise ValueError('Either path or as_base64 must be specified')
+
+        bounds = await self.bounds
+        clip = Page.Viewport.model_validate({
+            'x': bounds['x'],
+            'y': bounds['y'],
+            'width': bounds['width'],
+            'height': bounds['height'],
+            'scale': 1
+        })
+
+        img_base64 = (await self.execute_method(Page.CaptureScreenshot(
+            format_=get_img_format(path),
+            clip=clip,
+            quality=quality,
+        ))).data
+
+        if as_base64:
+            return img_base64
+
+        if path:
+            async with aiofiles.open(path, 'wb') as f:
+                await f.write(decode_base64_to_bytes(img_base64))
+
+        return None
+
+    async def click(self):
+        await self.scroll_into_view()
+
+        bounds = await self.bounds
+        center = (
+            bounds['x'] + bounds['width'] / 2,
+            bounds['y'] + bounds['height'] / 2
+        )
+
+        await self.execute_method(Input.DispatchMouseEvent(
+            type_='mousePressed',
+            x=round(center[0], 2),
+            y=round(center[1], 2),
+            button=Input.MouseButton.LEFT,
+            click_count=1
+        ))
+
+        await asyncio.sleep(.1)
+
+        await self.execute_method(Input.DispatchMouseEvent(
+            type_='mouseReleased',
+            x=round(center[0], 2),
+            y=round(center[1], 2),
+            button=Input.MouseButton.LEFT,
+            click_count=1
+        ))
+
+    async def input(self, value: str):
+        await self.scroll_into_view()
+
+        await self.execute_method(Input.InsertText(text=value))
+
+    async def execute_script(self, script: str):
+        return await self.execute_method(
+            Runtime.CallFunctionOn(
+                object_id=await self.object_id,
+                function_declaration=script
+            )
+        )
+
+    async def set_input_files(self, files: list[str]):
+        if self.tag != 'input' or self.get_attribute('type') != 'file':
+            raise ElementNotFileInput('Element is not a file input. '
+                                      'Please use Tab.expect_file_chooser to handle file chooser')
+        await self.execute_method(DOM.SetFileInputFiles(files=files, backend_node_id=self.backend_node_id))
