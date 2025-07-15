@@ -12,6 +12,7 @@ from cdpkit.exception import NoValidTabError, TabNotFoundError
 from cdpkit.logger import logger
 from cdpkit.protocol import Browser, Network, Storage, Target
 from webauto.browser.chromium.options import Options
+from webauto.browser.manager import InstanceManager
 from webauto.browser.tab import Tab
 
 
@@ -56,6 +57,7 @@ class BrowserContext(CDPSessionExecutor):
     context_id: Browser.BrowserContextID
     context_manager: ContextManager
     page_load_timeout: int = 30
+    tab_manager: InstanceManager[Target.TargetID, Tab] = InstanceManager[Target.TargetID, Tab]()
 
     async def _get_targets(self) -> AsyncGenerator[Target.TargetInfo, Any]:
         targets = (await self.execute_method(Target.GetTargets(filter_=[{
@@ -75,17 +77,26 @@ class BrowserContext(CDPSessionExecutor):
 
         return valid_target_infos
 
+    async def _get_tab_obj(self, target_id: Target.TargetID) -> Tab:
+        if target_id in self.tab_manager:
+            return self.tab_manager[target_id]
+
+        tab = await Tab.create_obj(
+            session_manager=self.session_manager,
+            tab_manager=self.tab_manager,
+            target_id=target_id,
+            browser_context_id=self.context_id,
+            page_load_timeout=self.page_load_timeout
+        )
+
+        return tab
+
     async def new_tab(self, url: str = '') -> Tab:
         target_id = (await self.execute_method(
             Target.CreateTarget(url=url, browser_context_id=self.context_id)
         )).targetId
 
-        return await Tab.create_obj(
-            session_manager=self.session_manager,
-            target_id=target_id,
-            browser_context_id=self.context_id,
-            page_load_timeout=self.page_load_timeout
-        )
+        return await self._get_tab_obj(target_id)
 
     async def get_tab(self, target_id: Target.TargetID | None = None) -> Tab:
         valid_target_infos = await self._get_valid_target_infos()
@@ -93,23 +104,13 @@ class BrowserContext(CDPSessionExecutor):
         if target_id is not None:
             if target_id not in valid_target_infos:
                 raise TabNotFoundError(f'Tab {target_id} not found')
-            return await Tab.create_obj(
-                session_manager=self.session_manager,
-                target_id=target_id,
-                browser_context_id=self.context_id,
-                page_load_timeout=self.page_load_timeout
-            )
+            return await self._get_tab_obj(target_id)
         else:
             if not valid_target_infos:
                 return await self.new_tab()
             else:
                 last_target_id = list(valid_target_infos.keys())[-1]
-                return await Tab.create_obj(
-                    session_manager=self.session_manager,
-                    target_id=last_target_id,
-                    browser_context_id=self.context_id,
-                    page_load_timeout=self.page_load_timeout
-                )
+                return await self._get_tab_obj(last_target_id)
 
     async def set_download_path(self, path: str) -> None:
         await self.execute_method(Browser.SetDownloadBehavior(

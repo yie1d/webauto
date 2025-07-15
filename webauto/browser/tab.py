@@ -10,6 +10,7 @@ import aiofiles
 from cdpkit.connection import CDPSessionManager
 from cdpkit.protocol import DOM, Browser, Page, Runtime, Target
 from webauto.browser.element import ElementFinder
+from webauto.browser.manager import InstanceManager
 from webauto.browser.utils import RuntimeParser, decode_base64_to_bytes, get_img_format
 
 
@@ -17,11 +18,13 @@ class Tab(ElementFinder):
     target_id: Target.TargetID
     browser_context_id: Browser.BrowserContextID
     page_load_timeout: int
+    tab_manager: InstanceManager[Target.TargetID, Tab]
 
     @classmethod
     async def create_obj(
         cls,
         session_manager: CDPSessionManager,
+        tab_manager: InstanceManager[Target.TargetID, Tab],
         target_id: Target.TargetID,
         browser_context_id: Browser.BrowserContextID,
         page_load_timeout: int
@@ -29,11 +32,14 @@ class Tab(ElementFinder):
         tab = cls(
             session=await session_manager.get_session(target_id),
             session_manager=session_manager,
+            tab_manager=tab_manager,
             target_id=target_id,
             browser_context_id=browser_context_id,
             page_load_timeout=page_load_timeout
         )
         await tab._init_tab()
+
+        tab_manager[target_id] = tab
         return tab
 
     async def _init_tab(self):
@@ -86,7 +92,7 @@ class Tab(ElementFinder):
         await self.session_manager.remove_session(self.target_id)
         await self.session.close()
 
-    async def get(self, url: str):
+    async def go_to(self, url: str):
         await self.execute_method(Page.Navigate(url=url))
 
         await self._init_tab()
@@ -94,13 +100,14 @@ class Tab(ElementFinder):
     async def new_tab(self, url: str = '', browser_context_id: Browser.BrowserContextID | None = None) -> Tab:
         target_id = (await self.execute_method(Target.CreateTarget(
             url=url,
-            browser_context_id=browser_context_id if browser_context_id is not None else self._browser_context_id
+            browser_context_id=browser_context_id if browser_context_id is not None else self.browser_context_id
         ))).targetId
 
         return await Tab.create_obj(
             session_manager=self.session_manager,
+            tab_manager=self.tab_manager,
             target_id=target_id,
-            browser_context_id=browser_context_id if browser_context_id is not None else self._browser_context_id,
+            browser_context_id=browser_context_id if browser_context_id is not None else self.browser_context_id,
             page_load_timeout=self.page_load_timeout
         )
 
