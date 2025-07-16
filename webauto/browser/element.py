@@ -11,6 +11,7 @@ from pydantic import PrivateAttr
 from cdpkit.connection import CDPSessionExecutor
 from cdpkit.exception import ElementNotFileInput, NoSuchElement, ParamsMustSpecified
 from cdpkit.protocol import DOM, Input, Page, Runtime
+from cdpkit.logger import logger
 from webauto.browser.constants import By, JsScripts
 from webauto.browser.utils import RuntimeParser, decode_base64_to_bytes, get_img_format
 
@@ -36,9 +37,12 @@ class ElementFinder(CDPSessionExecutor):
     @property
     async def object_id(self) -> Runtime.RemoteObjectId:
         if self._object_id is None:
+            if self.backend_node_id is None:
+                await self.node
             self._object_id = (await self.execute_method(DOM.ResolveNode(
                 backend_node_id=self.backend_node_id
             ))).object.objectId
+
         return self._object_id
 
     @property

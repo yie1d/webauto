@@ -16,7 +16,10 @@ class JsScripts:
     """
     @classmethod
     def document_ready_state(cls) -> str:
-        return """document.readyState"""
+        return """
+        function() {
+            return document.readyState;
+        }"""
 
     @classmethod
     def text_content(cls) -> str:

@@ -4,11 +4,13 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from pydantic import PrivateAttr
 
 import aiofiles
 
 from cdpkit.connection import CDPSessionManager
 from cdpkit.protocol import DOM, Browser, Page, Runtime, Target
+from cdpkit.logger import logger
 from webauto.browser.constants import JsScripts
 from webauto.browser.element import ElementFinder
 from webauto.browser.manager import InstanceManager
@@ -20,6 +22,8 @@ class Tab(ElementFinder):
     browser_context_id: Browser.BrowserContextID
     page_load_timeout: int
     tab_manager: InstanceManager[Target.TargetID, Tab]
+
+    _event_enable: bool = PrivateAttr(default=False)
 
     @classmethod
     async def create_obj(
@@ -38,28 +42,28 @@ class Tab(ElementFinder):
             browser_context_id=browser_context_id,
             page_load_timeout=page_load_timeout
         )
-        await tab._init_tab()
+        await tab._wait_page_load()
 
         tab_manager[target_id] = tab
         return tab
 
-    async def _init_tab(self):
-        await self._wait_page_load()
-
-        await self.execute_method(Page.Enable())
-        await self.execute_method(DOM.Enable())
-        await self.execute_method(Runtime.Enable())
-
-        # reset page state
-        await self.node
-
     async def _wait_page_load(self):
+        if not self._event_enable:
+            await self.execute_method(Page.Enable())
+            await self.execute_method(DOM.Enable())
+            await self.execute_method(Runtime.Enable())
+            self._event_enable = True
+
         start_time = asyncio.get_event_loop().time()
 
         while asyncio.get_event_loop().time() - start_time < self.page_load_timeout:
             if (await self.execute_script(JsScripts.document_ready_state())) == 'complete':
+                # reset page state
+                self.backend_node_id = None
+
+                await self.node
                 return
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
         else:
             raise TimeoutError('Page load timed out')
 
@@ -94,7 +98,7 @@ class Tab(ElementFinder):
     async def go_to(self, url: str):
         await self.execute_method(Page.Navigate(url=url))
 
-        await self._init_tab()
+        await self._wait_page_load()
 
     async def new_tab(self, url: str = '', browser_context_id: Browser.BrowserContextID | None = None) -> Tab:
         target_id = (await self.execute_method(Target.CreateTarget(
@@ -116,7 +120,7 @@ class Tab(ElementFinder):
             script_to_evaluate_on_load=script_to_evaluate_on_load
         ))
 
-        await self._init_tab()
+        await self._wait_page_load()
 
     async def take_screenshot(
         self,

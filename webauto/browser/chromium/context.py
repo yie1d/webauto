@@ -72,7 +72,7 @@ class BrowserContext(CDPSessionExecutor):
     async def _get_valid_target_infos(self) -> dict[Target.TargetID, Target.TargetInfo]:
         valid_target_infos = {}
         async for target_info in self._get_targets():
-            if 'extension' not in target_info.url:
+            if not (target_info.url.startswith('chrome-extension://') or target_info.url.startswith('devtools://')):
                 valid_target_infos[target_info.targetId] = target_info
 
         return valid_target_infos
@@ -194,15 +194,17 @@ class ContextManager(CDPSessionExecutor):
 
         target_infos = (await self.execute_method(Target.GetTargets())).targetInfos
         for target_info in target_infos:
-            all_exists_contexts.add(target_info.browserContextId)
+            if not (target_info.url.startswith('chrome-extension://') or target_info.url.startswith('devtools://')):
+                all_exists_contexts.add(target_info.browserContextId)
 
-        self.contexts = all_created_contexts | all_exists_contexts
+        for context_id in all_created_contexts:
+            if context_id not in all_exists_contexts:
+                await self.execute_method(Target.DisposeBrowserContext(browser_context_id=context_id))
+
+        self.contexts = all_exists_contexts.copy()
 
         # By default, prioritize manually created contexts
-        origin_context = all_exists_contexts - all_created_contexts
-        if not origin_context:
-            origin_context = all_exists_contexts
-        self._cur_context_id = origin_context.pop()
+        self._cur_context_id = all_exists_contexts.pop()
 
         return self
 

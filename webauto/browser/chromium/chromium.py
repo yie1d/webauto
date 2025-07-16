@@ -12,17 +12,6 @@ from webauto.browser.chromium.context import BrowserInfo, BrowserProcess, Contex
 from webauto.browser.chromium.options import Options
 
 
-class BrowserHandler(CDPSessionExecutor):
-    _page_load_timeout: int = PrivateAttr(default=30)
-
-    async def set_page_load_timeout(self, timeout: int):
-        self._page_load_timeout = timeout
-
-    async def get_tab(self, target_id: Target.TargetID = 'browser'):
-        # todo get_tab
-        ...
-
-
 class BrowserType(CDPSessionExecutor):
     name: str
     browser_path_dict: dict[str, list[str]] | None = None
