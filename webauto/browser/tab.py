@@ -9,9 +9,10 @@ import aiofiles
 
 from cdpkit.connection import CDPSessionManager
 from cdpkit.protocol import DOM, Browser, Page, Runtime, Target
+from webauto.browser.constants import JsScripts
 from webauto.browser.element import ElementFinder
 from webauto.browser.manager import InstanceManager
-from webauto.browser.utils import RuntimeParser, decode_base64_to_bytes, get_img_format
+from webauto.browser.utils import decode_base64_to_bytes, get_img_format
 
 
 class Tab(ElementFinder):
@@ -56,9 +57,7 @@ class Tab(ElementFinder):
         start_time = asyncio.get_event_loop().time()
 
         while asyncio.get_event_loop().time() - start_time < self.page_load_timeout:
-            if (await RuntimeParser.parse_remote_object(self, (
-                await self.execute_method(Runtime.Evaluate(expression='document.readyState'))
-            ).result)) == 'complete':
+            if (await self.execute_script(JsScripts.document_ready_state())) == 'complete':
                 return
             await asyncio.sleep(0.1)
         else:

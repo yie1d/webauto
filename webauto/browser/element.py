@@ -11,7 +11,7 @@ from pydantic import PrivateAttr
 from cdpkit.connection import CDPSessionExecutor
 from cdpkit.exception import ElementNotFileInput, NoSuchElement, ParamsMustSpecified
 from cdpkit.protocol import DOM, Input, Page, Runtime
-from webauto.browser.constants import By
+from webauto.browser.constants import By, JsScripts
 from webauto.browser.utils import RuntimeParser, decode_base64_to_bytes, get_img_format
 
 
@@ -122,28 +122,9 @@ class ElementFinder(CDPSessionExecutor):
             xpath = xpath.replace('"', '\\"')
 
             if mode == 'multiple':
-                function_declaration = f"""
-                        function() {{
-                            var elements = document.evaluate(
-                                "{xpath}", this, null,
-                                XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
-                            );
-                            var results = [];
-                            for (var inx = 0; inx < elements.snapshotLength; inx++) {{
-                                results.push(elements.snapshotItem(inx));
-                            }}
-                            return results;
-                        }}
-                    """
+                function_declaration = JsScripts.find_elements_by_xpath(xpath)
             else:
-                function_declaration = f"""
-                        function() {{
-                            return document.evaluate(
-                                "{xpath}", this, null,
-                                XPathResult.FIRST_ORDERED_NODE_TYPE, null
-                            ).singleNodeValue;
-                        }}
-                    """
+                function_declaration = JsScripts.find_element_by_xpath(xpath)
 
             call_result = (await self.execute_method(Runtime.CallFunctionOn(
                 function_declaration=function_declaration,
@@ -207,8 +188,25 @@ class ElementFinder(CDPSessionExecutor):
         else:
             return await self.find_elements_by_selector(value)
 
+    async def execute_script(self, script: str):
+        execute_resp = (await self.execute_method(
+            Runtime.CallFunctionOn(
+                object_id=await self.object_id,
+                function_declaration=script
+            )
+        ))
+
+        return await RuntimeParser.parse_remote_object(self, remote_object=execute_resp.result)
+
 
 class Element(ElementFinder):
+    @property
+    async def parent(self) -> Element:
+        parent_id = (await self.node).parentId
+        if parent_id is None:
+            raise NoSuchElement
+        return await self._make_element(node_id=parent_id)
+
     @property
     async def value(self) -> str | None:
         return await self.get_attribute('value')
@@ -234,26 +232,15 @@ class Element(ElementFinder):
 
     @property
     async def text(self) -> str:
-        result = (await self.execute_script(
-            script="""
-            function() {
-                return this.textContent;
-            }"""
-
-        )).result
-        return await RuntimeParser.parse_remote_object(self, remote_object=result)
+        return await self.execute_script(
+            script=JsScripts.text_content()
+        )
 
     @property
     async def bounds(self) -> dict[str, int | float]:
-
-        result = (await self.execute_script(
-            script="""
-                    function() {
-                        return JSON.stringify(this.getBoundingClientRect());
-                    }"""
-        )).result
-
-        return json.loads(await RuntimeParser.parse_remote_object(self, result))
+        return json.loads(await self.execute_script(
+            script=JsScripts.get_bounding_client_rect()
+        ))
 
     @property
     async def outer_html(self) -> str:
@@ -346,14 +333,6 @@ class Element(ElementFinder):
         await self.scroll_into_view()
 
         await self.execute_method(Input.InsertText(text=value))
-
-    async def execute_script(self, script: str):
-        return await self.execute_method(
-            Runtime.CallFunctionOn(
-                object_id=await self.object_id,
-                function_declaration=script
-            )
-        )
 
     async def set_input_files(self, files: list[str]):
         if self.tag != 'input' or self.get_attribute('type') != 'file':

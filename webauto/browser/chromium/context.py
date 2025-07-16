@@ -81,15 +81,13 @@ class BrowserContext(CDPSessionExecutor):
         if target_id in self.tab_manager:
             return self.tab_manager[target_id]
 
-        tab = await Tab.create_obj(
+        return await Tab.create_obj(
             session_manager=self.session_manager,
             tab_manager=self.tab_manager,
             target_id=target_id,
             browser_context_id=self.context_id,
             page_load_timeout=self.page_load_timeout
         )
-
-        return tab
 
     async def new_tab(self, url: str = '') -> Tab:
         target_id = (await self.execute_method(
