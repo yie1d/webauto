@@ -36,21 +36,21 @@ class JsScripts:
         }"""
 
     @classmethod
-    def find_element_by_xpath(cls, xpath: str) -> str:
+    def find_element_by_xpath(cls, xpath: str, is_document: bool = True) -> str:
         return f"""
         function() {{
-            return document.evaluate(
-                "{xpath}", this, null,
+            return [document.evaluate(
+                "{xpath}", {"document" if is_document else "this"}, null,
                 XPathResult.FIRST_ORDERED_NODE_TYPE, null
-            ).singleNodeValue;
+            ).singleNodeValue];
         }}"""
 
     @classmethod
-    def find_elements_by_xpath(cls, xpath: str) -> str:
+    def find_elements_by_xpath(cls, xpath: str, is_document: bool = False) -> str:
         return f"""
             function() {{
                 var elements = document.evaluate(
-                    "{xpath}", this, null,
+                    "{xpath}", {"document" if is_document else "this"}, null,
                     XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
                 );
                 var results = [];

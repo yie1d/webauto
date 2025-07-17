@@ -4,13 +4,12 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from pydantic import PrivateAttr
 
 import aiofiles
+from pydantic import PrivateAttr
 
 from cdpkit.connection import CDPSessionManager
 from cdpkit.protocol import DOM, Browser, Page, Runtime, Target
-from cdpkit.logger import logger
 from webauto.browser.constants import JsScripts
 from webauto.browser.element import ElementFinder
 from webauto.browser.manager import InstanceManager
@@ -58,10 +57,6 @@ class Tab(ElementFinder):
 
         while asyncio.get_event_loop().time() - start_time < self.page_load_timeout:
             if (await self.execute_script(JsScripts.document_ready_state())) == 'complete':
-                # reset page state
-                self.backend_node_id = None
-
-                await self.node
                 return
             await asyncio.sleep(0.5)
         else:

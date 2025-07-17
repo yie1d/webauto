@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +12,6 @@ from pydantic import PrivateAttr
 from cdpkit.connection import CDPSessionExecutor
 from cdpkit.exception import ElementNotFileInput, NoSuchElement, ParamsMustSpecified
 from cdpkit.protocol import DOM, Input, Page, Runtime
-from cdpkit.logger import logger
 from webauto.browser.constants import By, JsScripts
 from webauto.browser.utils import RuntimeParser, decode_base64_to_bytes, get_img_format
 
@@ -27,18 +27,15 @@ class ElementFinder(CDPSessionExecutor):
             _node = (await self.execute_method(
                 DOM.GetDocument(depth=0)
             )).root
-            self.backend_node_id = _node.backendNodeId
         else:
             _node = (await self.execute_method(
                 DOM.DescribeNode(backend_node_id=self.backend_node_id)
-            ))
+            )).node
         return _node
 
     @property
     async def object_id(self) -> Runtime.RemoteObjectId:
-        if self._object_id is None:
-            if self.backend_node_id is None:
-                await self.node
+        if self._object_id is None and self.backend_node_id:
             self._object_id = (await self.execute_method(DOM.ResolveNode(
                 backend_node_id=self.backend_node_id
             ))).object.objectId
@@ -48,11 +45,6 @@ class ElementFinder(CDPSessionExecutor):
     @property
     async def node_id(self) -> DOM.NodeId:
         return (await self.node).nodeId
-
-    def update(self, backend_node_id: DOM.BackendNodeId | None):
-        if backend_node_id:
-            self.backend_node_id = backend_node_id
-            self._object_id = None
 
     @staticmethod
     async def _convert_find_by_value(by: By, value: str) -> str:
@@ -95,16 +87,14 @@ class ElementFinder(CDPSessionExecutor):
         selector: str,
         mode: Literal['single', 'multiple'] = 'single'
     ) -> list[Element]:
-        backend_node_ids = [self.backend_node_id]
-
-        node_id = (await self.execute_method(
-            DOM.PushNodesByBackendIdsToFrontend(backend_node_ids=backend_node_ids)
-        )).nodeIds[0]
-
         if mode == 'multiple':
-            node_ids = (await self.execute_method(DOM.QuerySelectorAll(node_id=node_id, selector=selector))).nodeIds
+            node_ids = (await self.execute_method(
+                DOM.QuerySelectorAll(node_id=await self.node_id, selector=selector)
+            )).nodeIds
         else:
-            node_ids = [(await self.execute_method(DOM.QuerySelector(node_id=node_id, selector=selector))).nodeId]
+            node_ids = [(await self.execute_method(
+                DOM.QuerySelector(node_id=await self.node_id, selector=selector)
+            )).nodeId]
 
         return [await self._make_element(node_id=node_id) for node_id in node_ids]
 
@@ -122,59 +112,28 @@ class ElementFinder(CDPSessionExecutor):
         xpath: str,
         mode: Literal['single', 'multiple'] = 'single'
     ) -> list[Element]:
-        if self.__class__.__name__ == 'Element':
-            xpath = xpath.replace('"', '\\"')
+        xpath = xpath.replace('"', '\\"')
 
-            if mode == 'multiple':
-                function_declaration = JsScripts.find_elements_by_xpath(xpath)
-            else:
-                function_declaration = JsScripts.find_element_by_xpath(xpath)
-
-            call_result = (await self.execute_method(Runtime.CallFunctionOn(
-                function_declaration=function_declaration,
-                object_id=await self.object_id,
-                return_by_value=False
-            ))).result
-
-            object_ids: list[Runtime.RemoteObjectId] | None = await RuntimeParser.parse_remote_object(
-                session_executor=self,
-                remote_object=call_result
-            )
-            if object_ids is None:
-                raise NoSuchElement
-
-            elements = []
-            for object_id in object_ids:
-                node = (await self.execute_method(DOM.DescribeNode(object_id=object_id))).node
-                if node.nodeId == 0:
-                    node.nodeId = (await self.execute_method(DOM.PushNodesByBackendIdsToFrontend(
-                        backend_node_ids=[node.backendNodeId]
-                    ))).nodeIds[0]
-                elements.append(await self._make_element(node=node))
-            return elements
+        if mode == 'multiple':
+            function_declaration = JsScripts.find_elements_by_xpath(xpath, is_document=self.backend_node_id is None)
         else:
-            perform_search = (await self.execute_method(
-                DOM.PerformSearch(query=xpath, include_user_agent_shadow_dom=True)
-            ))
-            try:
-                if perform_search.resultCount == 0:
-                    if mode == 'multiple':
-                        return []
-                    else:
-                        raise NoSuchElement
-                if mode == 'multiple':
-                    to_index = perform_search.resultCount
-                else:
-                    to_index = 1
-                node_ids = (await self.execute_method(DOM.GetSearchResults(
-                    search_id=perform_search.searchId,
-                    from_index=0,
-                    to_index=to_index
-                ))).nodeIds
-            finally:
-                await self.execute_method(DOM.DiscardSearchResults(search_id=perform_search.searchId))
+            function_declaration = JsScripts.find_element_by_xpath(xpath, is_document=self.backend_node_id is None)
 
-            return [await self._make_element(node_id=node_id) for node_id in node_ids]
+        object_ids = await self.execute_script(function_declaration)
+
+        if object_ids is None:
+            return []
+
+        elements = []
+        for object_id in object_ids:
+            node = (await self.execute_method(DOM.DescribeNode(object_id=object_id))).node
+            if node.nodeId == 0:
+                await self.node
+                node.nodeId = (await self.execute_method(DOM.PushNodesByBackendIdsToFrontend(
+                    backend_node_ids=[node.backendNodeId]
+                ))).nodeIds[0]
+            elements.append(await self._make_element(node=node))
+        return elements
 
     async def find_element(self, by: By, value: str) -> Element:
         value = await self._convert_find_by_value(by, value)
@@ -193,12 +152,22 @@ class ElementFinder(CDPSessionExecutor):
             return await self.find_elements_by_selector(value)
 
     async def execute_script(self, script: str):
-        execute_resp = (await self.execute_method(
-            Runtime.CallFunctionOn(
-                object_id=await self.object_id,
-                function_declaration=script
-            )
-        ))
+        script = script.strip(' \n')
+        if 'this' in script:
+            execute_resp = (await self.execute_method(
+                Runtime.CallFunctionOn(
+                    function_declaration=script,
+                    object_id=await self.object_id
+                )
+            ))
+        else:
+            if re.search('^function.*};?$', script, re.DOTALL):
+                script = f'({script})()'
+            execute_resp = (await self.execute_method(
+                Runtime.Evaluate(
+                    expression=script
+                )
+            ))
 
         return await RuntimeParser.parse_remote_object(self, remote_object=execute_resp.result)
 

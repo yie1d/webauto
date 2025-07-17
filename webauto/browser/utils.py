@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 from cdpkit.connection import CDPSessionExecutor
+from cdpkit.exception import ScriptRunError
 from cdpkit.logger import logger
 from cdpkit.protocol import Runtime
 
@@ -67,6 +68,8 @@ class RuntimeParser:
                         return res
                     case 'null':
                         return None
+                    case 'error':
+                        raise ScriptRunError(remote_object.description)
                     case _:
                         raise Exception(f"It needs to be implemented {remote_object.model_dump()}")
             case 'string' | 'number':
