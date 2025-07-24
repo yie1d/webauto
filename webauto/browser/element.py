@@ -13,7 +13,8 @@ from cdpkit.connection import CDPSessionExecutor
 from cdpkit.exception import ElementNotFileInput, NoSuchElement, ParamsMustSpecified
 from cdpkit.protocol import DOM, Input, Page, Runtime
 from webauto.browser.constants import By, JsScripts
-from webauto.browser.utils import RuntimeParser, decode_base64_to_bytes, get_img_format
+from webauto.browser.tools.runtime import RuntimeParser
+from webauto.browser.utils import decode_base64_to_bytes, get_img_format
 
 
 class ElementFinder(CDPSessionExecutor):
