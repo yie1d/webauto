@@ -7,7 +7,6 @@ from pydantic import PrivateAttr
 
 from cdpkit.connection import CDPSessionExecutor, CDPSessionManager
 from cdpkit.exception import BrowserLaunchError, ExecutableNotFoundError
-from cdpkit.protocol import Target
 from webauto.browser.chromium.context import BrowserInfo, BrowserProcess, ContextManager
 from webauto.browser.chromium.options import Options
 
